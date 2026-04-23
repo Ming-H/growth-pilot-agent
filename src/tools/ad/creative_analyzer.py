@@ -11,7 +11,10 @@ from typing import Any
 import numpy as np
 from scipy import stats as sp_stats
 
+from src.tools.registry import ToolRegistry
 
+
+@ToolRegistry.register("creative_analyzer")
 class CreativeAnalyzer:
     """Analyze ad creative performance, detect fatigue, and run A/B tests."""
 

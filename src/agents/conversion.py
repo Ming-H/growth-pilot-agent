@@ -1,12 +1,12 @@
-"""ConversionAgent - Conversion funnel analysis, reach planning, coupon design."""
+"""ConversionExpert - Conversion funnel analysis, reach planning, coupon design."""
 
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from src.core.base import BaseAgent
-from src.core.state import AgentState
+from src.core.expert import ExpertAgentBase
+from src.prompts.templates.agent_prompts import ConversionPrompt
 
 logger = logging.getLogger(__name__)
 
@@ -25,62 +25,67 @@ except ImportError:
 
     ReachPlanner = FunnelAnalyzer = SlotAllocator = CouponDesigner = _Stub
 
-# Attributor and SeasonalAnalyzer are not yet implemented
-try:
-    from src.tools.conversion import Attributor, SeasonalAnalyzer
-except ImportError:
 
-    class _Stub2:
-        def __init__(self, *a: Any, **kw: Any) -> None: ...
-
-        def analyze(self, *a: Any, **kw: Any) -> dict:
-            return {"status": "not_implemented"}
-
-    Attributor = SeasonalAnalyzer = _Stub2
-
-
-SYSTEM_PROMPT = """\
-你是 GrowthPilot 转化 Agent。你的职责是：
-1. 设计触达策略 (reach planning)
-2. 分析转化漏斗
-3. 分配投放位
-4. 设计优惠券策略
-5. 结合季节性因素
-
-请用 JSON 格式输出分析结果。
-"""
-
-
-class ConversionAgent(BaseAgent):
+class ConversionExpert(ExpertAgentBase):
     """Designs conversion strategies for freight user acquisition."""
 
     name = "conversion"
-    description = "转化策略 Agent"
+    description = "转化策略 Expert"
 
-    def __init__(self, llm: Any, system_prompt: str = SYSTEM_PROMPT) -> None:
-        super().__init__(llm=llm, system_prompt=system_prompt)
-        self._reach_planner = ReachPlanner()
-        self._funnel_analyzer = FunnelAnalyzer()
-        self._slot_allocator = SlotAllocator()
-        self._coupon_designer = CouponDesigner()
+    # ------------------------------------------------------------------
+    # Keyword matching
+    # ------------------------------------------------------------------
+    _KEYWORDS = ("转化", "漏斗", "优惠券", "转化率", "coupon", "funnel", "conversion")
 
-    async def run(self, state: AgentState) -> dict[str, Any]:
-        """Execute the conversion analysis pipeline."""
+    @classmethod
+    def can_handle(cls, query: str) -> bool:
+        """Return True if *query* mentions conversion-related topics."""
+        lower = query.lower()
+        return any(kw in lower for kw in cls._KEYWORDS)
+
+    # ------------------------------------------------------------------
+    # Initialisation helpers
+    # ------------------------------------------------------------------
+    def _init_tools(self) -> dict[str, Any]:
+        """Instantiate and return the four conversion tools."""
+        return {
+            "reach_planner": ReachPlanner(),
+            "funnel_analyzer": FunnelAnalyzer(),
+            "slot_allocator": SlotAllocator(),
+            "coupon_designer": CouponDesigner(),
+        }
+
+    def _get_system_prompt(self) -> str:
+        """Build the default system prompt from ConversionPrompt template."""
+        template = ConversionPrompt()
+        return f"{template.role_definition}\n\n{template.business_context}"
+
+    # ------------------------------------------------------------------
+    # Pipeline execution
+    # ------------------------------------------------------------------
+    def _execute_pipeline(self, params: dict) -> dict:
+        """Run all four conversion tool steps and return raw results dict.
+
+        Returns a dict with keys: reach_result, funnel_result,
+        slot_result, coupon_results, errors.
+        """
+        tools = self._init_tools()
+
+        prospect = params.get("prospect_results", {})
+        budget = params.get("budget")
+
         errors: list[str] = []
-        prospect = state.get("prospect_results") or {}
-        subsidy = state.get("subsidy_results") or {}
 
         # 1. Design reach strategy
         reach_result: dict = {}
         try:
-            # Build user_segments from prospect results
             user_segments = self._extract_user_segments(prospect)
-            constraints: dict[str, Any] = {}
-            if state.get("budget"):
-                constraints["budget"] = state["budget"]
-            reach_result = self._reach_planner.plan_reach_strategy(
+            constraints: dict[str, Any] | None = None
+            if budget is not None:
+                constraints = {"budget": budget}
+            reach_result = tools["reach_planner"].plan_reach_strategy(
                 user_segments=user_segments,
-                constraints=constraints if constraints else None,
+                constraints=constraints,
             )
         except Exception as exc:
             logger.warning("ReachPlanner failed: %s", exc)
@@ -89,9 +94,8 @@ class ConversionAgent(BaseAgent):
         # 2. Analyze funnel
         funnel_result: dict = {}
         try:
-            # Use default funnel data or data from state
-            funnel_data = self._get_funnel_data(state)
-            funnel_result = self._funnel_analyzer.analyze_funnel(funnel_data)
+            funnel_data = self._get_funnel_data(params)
+            funnel_result = tools["funnel_analyzer"].analyze_funnel(funnel_data)
         except Exception as exc:
             logger.warning("FunnelAnalyzer failed: %s", exc)
             errors.append(f"FunnelAnalyzer: {exc}")
@@ -100,7 +104,7 @@ class ConversionAgent(BaseAgent):
         slot_result: dict = {}
         try:
             user_segments_for_slots = self._build_slot_segments(prospect)
-            slot_result = self._slot_allocator.allocate_slots(
+            slot_result = tools["slot_allocator"].allocate_slots(
                 user_segments=user_segments_for_slots,
             )
         except Exception as exc:
@@ -110,14 +114,16 @@ class ConversionAgent(BaseAgent):
         # 4. Design coupons for each segment
         coupon_results: list[dict] = []
         try:
-            segment_names = ["new_user", "active", "moderate", "dormant", "high_value", "at_risk"]
+            segment_names = [
+                "new_user", "active", "moderate", "dormant",
+                "high_value", "at_risk",
+            ]
             budget_constraint = None
-            if state.get("budget"):
-                # Allocate up to 20% of budget for coupons
-                budget_constraint = state["budget"] * 0.2
+            if budget is not None:
+                budget_constraint = budget * 0.2
             for seg in segment_names:
                 try:
-                    coupon = self._coupon_designer.design_coupon(
+                    coupon = tools["coupon_designer"].design_coupon(
                         user_segment=seg,
                         budget_constraint=budget_constraint,
                     )
@@ -128,34 +134,84 @@ class ConversionAgent(BaseAgent):
             logger.warning("CouponDesigner failed: %s", exc)
             errors.append(f"CouponDesigner: {exc}")
 
-        # 5. LLM synthesis
-        try:
-            prompt = self._build_conversion_prompt(
-                reach_result=reach_result,
-                funnel_result=funnel_result,
-                slot_result=slot_result,
-                coupon_results=coupon_results,
-                state=state,
-            )
-            llm_response = await self._invoke_llm(prompt)
-            analysis = self._parse_json_response(llm_response)
-        except Exception as exc:
-            logger.warning("Conversion LLM synthesis failed: %s", exc)
-            analysis = {"summary": "LLM synthesis unavailable"}
-            errors.append(f"LLM synthesis: {exc}")
-
-        result: dict[str, Any] = {
-            "conversion_results": {
-                "reach_result": reach_result,
-                "funnel_result": funnel_result,
-                "slot_result": slot_result,
-                "coupon_results": coupon_results,
-                "analysis": analysis,
-            },
+        return {
+            "reach_result": reach_result,
+            "funnel_result": funnel_result,
+            "slot_result": slot_result,
+            "coupon_results": coupon_results,
+            "errors": errors,
         }
-        if errors:
-            result["errors"] = errors
-        return result
+
+    # ------------------------------------------------------------------
+    # Prompt building
+    # ------------------------------------------------------------------
+    def _build_synthesis_prompt(self, params: dict, results: dict) -> str:
+        """Build the LLM synthesis prompt from tool results.
+
+        Adapted from the former ``_build_conversion_prompt``.
+        """
+        reach_result = results.get("reach_result", {})
+        funnel_result = results.get("funnel_result", {})
+        slot_result = results.get("slot_result", {})
+        coupon_results = results.get("coupon_results", [])
+
+        # Build reach summary
+        reach_summary = ""
+        if reach_result.get("strategies"):
+            strategies = reach_result["strategies"]
+            parts = [f"{len(strategies)} 个分层策略"]
+            for seg, plan in list(strategies.items())[:3]:
+                if isinstance(plan, dict):
+                    parts.append(
+                        f"  - {seg}: 渠道={plan.get('primary_channel', 'N/A')}, "
+                        f"创意={plan.get('creative', 'N/A')[:30]}"
+                    )
+            reach_summary = "\n".join(parts)
+
+        # Build funnel metrics
+        funnel_overall_cvr = ""
+        if funnel_result.get("overall_conversion_rate") is not None:
+            funnel_overall_cvr = f"{funnel_result['overall_conversion_rate']:.2%}"
+
+        bottleneck_stage = ""
+        bottleneck_cvr = ""
+        if funnel_result.get("bottleneck"):
+            bn = funnel_result["bottleneck"]
+            bottleneck_stage = bn.get("stage", "N/A")
+            bottleneck_cvr = str(bn.get("stage_conversion_rate", "N/A"))
+
+        # Build slot usage
+        slot_usage = ""
+        if slot_result.get("total_slots_used"):
+            slot_usage = (
+                f"使用 {slot_result['total_slots_used']}/"
+                f"{slot_result.get('total_slots_available', '?')} 个位"
+            )
+
+        # Build coupon summary
+        coupon_summary = ""
+        if coupon_results:
+            parts = [f"{len(coupon_results)} 个分层方案"]
+            for c in coupon_results[:3]:
+                parts.append(
+                    f"  - {c.get('segment', 'N/A')}: "
+                    f"{c.get('coupon_type', 'N/A')}, "
+                    f"金额={c.get('amount', 'N/A')}"
+                )
+            coupon_summary = "\n".join(parts)
+
+        return ConversionPrompt().render(
+            user_query=params.get("query", ""),
+            season=params.get("season", "当前"),
+            kpi_baseline=params.get("kpi_baseline", {}),
+            memory_context=params.get("memory_context", {}),
+            reach_summary=reach_summary,
+            funnel_overall_cvr=funnel_overall_cvr,
+            bottleneck_stage=bottleneck_stage,
+            bottleneck_cvr=bottleneck_cvr,
+            slot_usage=slot_usage,
+            coupon_summary=coupon_summary,
+        )
 
     # ------------------------------------------------------------------
     # Helpers
@@ -172,8 +228,8 @@ class ConversionAgent(BaseAgent):
         return {"new_user": 5000, "active": 8000, "moderate": 6000, "dormant": 3000}
 
     @staticmethod
-    def _get_funnel_data(state: AgentState) -> dict[str, int]:
-        """Get funnel data from state or return default sample."""
+    def _get_funnel_data(params: dict) -> dict[str, int]:
+        """Get funnel data from params or return default sample."""
         # Default sample funnel data for demo
         return {
             "exposure": 100000,
@@ -207,53 +263,3 @@ class ConversionAgent(BaseAgent):
             "moderate": {"count": 6000, "ltv": 120, "priority": 3},
             "dormant": {"count": 3000, "ltv": 60, "priority": 2},
         }
-
-    def _build_conversion_prompt(
-        self,
-        *,
-        reach_result: dict,
-        funnel_result: dict,
-        slot_result: dict,
-        coupon_results: list[dict],
-        state: AgentState,
-    ) -> str:
-        context = self._build_prompt_context(state)
-        parts = [context, "", "## 转化分析数据"]
-
-        if reach_result.get("strategies"):
-            strategies = reach_result["strategies"]
-            parts.append(f"- 触达策略: {len(strategies)} 个分层策略")
-            for seg, plan in list(strategies.items())[:3]:
-                if isinstance(plan, dict):
-                    parts.append(f"  - {seg}: 渠道={plan.get('primary_channel', 'N/A')}, 创意={plan.get('creative', 'N/A')[:30]}")
-
-        if funnel_result.get("overall_conversion_rate") is not None:
-            parts.append(f"- 整体转化率: {funnel_result['overall_conversion_rate']:.2%}")
-        if funnel_result.get("bottleneck"):
-            bn = funnel_result["bottleneck"]
-            parts.append(f"- 漏斗瓶颈: {bn.get('stage', 'N/A')} (转化率: {bn.get('stage_conversion_rate', 'N/A')})")
-
-        if slot_result.get("total_slots_used"):
-            parts.append(f"- 投放位分配: 使用 {slot_result['total_slots_used']}/{slot_result.get('total_slots_available', '?')} 个位")
-
-        if coupon_results:
-            parts.append(f"- 优惠券方案: {len(coupon_results)} 个分层方案")
-            for c in coupon_results[:3]:
-                parts.append(f"  - {c.get('segment', 'N/A')}: {c.get('coupon_type', 'N/A')}, 金额={c.get('amount', 'N/A')}")
-
-        parts.append("""
-请基于以上数据给出转化策略的综合分析和建议：
-1. 触达策略评估
-2. 漏斗优化建议
-3. 优惠券策略建议
-4. 投放位分配评估
-
-请以 JSON 格式输出:
-{
-  "summary": "总体概述",
-  "reach_assessment": "触达策略评估",
-  "funnel_optimization": "漏斗优化建议",
-  "coupon_recommendation": "优惠券策略建议",
-  "slot_recommendation": "投放位分配建议"
-}""")
-        return "\n".join(parts)

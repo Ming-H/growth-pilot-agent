@@ -13,6 +13,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.tools.registry import ToolRegistry
+
 logger = logging.getLogger(__name__)
 
 # Coupon type constants
@@ -60,6 +62,7 @@ SEGMENT_DEFAULTS: dict[str, dict[str, Any]] = {
 }
 
 
+@ToolRegistry.register("coupon_designer")
 class CouponDesigner:
     """Design discount and threshold coupons optimized for each segment."""
 

@@ -15,9 +15,12 @@ import pandas as pd
 from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.model_selection import StratifiedKFold
 
+from src.tools.registry import ToolRegistry
+
 logger = logging.getLogger(__name__)
 
 
+@ToolRegistry.register("churn_predictor")
 class ChurnPredictor:
     """LightGBM-based churn prediction for ride-hailing users.
 

@@ -12,6 +12,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.tools.registry import ToolRegistry
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -25,6 +27,7 @@ _REQUIRED_PROFILE_COLUMNS = {"user_id"}
 _OPTIONAL_PROFILE_COLUMNS = {"city_tier", "has_freight_search", "has_large_item_search"}
 
 
+@ToolRegistry.register("feature_engine")
 class FeatureEngine:
     """Extract user-level features from ride-hailing event logs and profiles.
 

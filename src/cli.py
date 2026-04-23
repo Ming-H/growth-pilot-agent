@@ -15,6 +15,7 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
+from src.core import __version__
 from src.core.config import get_settings
 
 console = Console()
@@ -460,7 +461,7 @@ def info() -> None:
     table.add_column("Value", style="green")
 
     info_items = [
-        ("Version", "4.0.0"),
+        ("Version", __version__),
         ("LLM Provider", settings.llm_provider),
         ("LLM Model", settings.llm_model),
         ("API Key Set", "Yes" if settings.llm_api_key else "No (demo mode)"),
@@ -484,12 +485,12 @@ def info() -> None:
     agent_table.add_column("Description", style="white")
 
     agents = [
-        ("orchestrator", "all", "Orchestrates sub-agents based on query"),
-        ("prospect", "prospect", "User scoring, segmentation, LTV prediction"),
-        ("conversion", "conversion", "Funnel analysis, coupons, attribution"),
-        ("subsidy", "subsidy", "Causal inference, elasticity, budget optimization"),
-        ("retention", "retention", "Churn prediction, nurture, winback"),
-        ("ad", "ad", "RTA strategy, bid optimization, creative analysis"),
+        ("chief (GrowthPilot)", "all", "主控 Agent — 动态编排专家团队"),
+        ("prospect_analysis", "prospect", "潜客识别、评分、分群、LTV预测"),
+        ("conversion_analysis", "conversion", "漏斗分析、优惠券、触达策略"),
+        ("subsidy_analysis", "subsidy", "因果推断、弹性、预算优化"),
+        ("retention_analysis", "retention", "流失预测、培育、召回策略"),
+        ("ad_analysis", "ad", "RTA策略、出价优化、创意分析"),
     ]
     for name, scope, desc in agents:
         agent_table.add_row(name, scope, desc)

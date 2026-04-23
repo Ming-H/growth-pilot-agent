@@ -13,9 +13,12 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from src.tools.registry import ToolRegistry
+
 logger = logging.getLogger(__name__)
 
 
+@ToolRegistry.register("elasticity")
 class ElasticityEstimator:
     """Estimate price elasticity of demand (own-price elasticity)."""
 

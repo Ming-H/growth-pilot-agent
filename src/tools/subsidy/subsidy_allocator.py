@@ -12,6 +12,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.tools.registry import ToolRegistry
+
 logger = logging.getLogger(__name__)
 
 # Default coupon templates per segment
@@ -25,6 +27,7 @@ DEFAULT_COUPON_CONFIG: dict[str, dict[str, Any]] = {
 }
 
 
+@ToolRegistry.register("subsidy_allocator")
 class SubsidyAllocator:
     """Generate final subsidy allocation plan from analysis results."""
 

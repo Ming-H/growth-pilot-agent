@@ -17,9 +17,12 @@ from sklearn.isotonic import IsotonicRegression
 from sklearn.metrics import accuracy_score, roc_auc_score
 from sklearn.model_selection import StratifiedKFold
 
+from src.tools.registry import ToolRegistry
+
 logger = logging.getLogger(__name__)
 
 
+@ToolRegistry.register("intent_model")
 class IntentModel:
     """LightGBM-based freight intent prediction model.
 

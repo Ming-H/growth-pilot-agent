@@ -12,9 +12,12 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.tools.registry import ToolRegistry
+
 logger = logging.getLogger(__name__)
 
 
+@ToolRegistry.register("segmentor")
 class UserSegmentor:
     """RFM + lifecycle segmentation for ride-hailing users.
 
@@ -210,14 +213,15 @@ class UserSegmentor:
         n = self.n_bins
         try:
             scores = pd.qcut(series, q=n, labels=False, duplicates="drop") + 1
-        except ValueError:
+        except (ValueError, TypeError):
             # Not enough unique values for n bins
-            scores = pd.Series(np.ones(len(series), dtype=int), index=series.index)
+            scores = pd.Series(np.ones(len(series), dtype=float), index=series.index)
 
         if invert:
             scores = (n + 1) - scores
 
-        return scores.astype(int)
+        # Fill NaN (from qcut on uniform data) and convert to int safely
+        return scores.fillna(1).astype(int)
 
     @staticmethod
     def _classify_rfm(score: int) -> str:

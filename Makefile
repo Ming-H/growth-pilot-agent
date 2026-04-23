@@ -36,7 +36,23 @@ setup-data:
 	uv run python -c "from src.tools.common.data_loader import DataLoader; dl = DataLoader(); [dl.load_sample_data(n) for n in ['user_behavior','funnel','subsidy_experiment','retention','ad_campaign','touchpoint_journey','seasonal_history']]"
 
 docker-build:
-	docker build -f deploy/Dockerfile -t growth-pilot-agent .
+	docker build -f Dockerfile -t growth-pilot-api .
 
 docker-run:
+	docker run --rm -it -p 8000:8000 --env-file .env -v $(PWD)/data:/app/data growth-pilot-api
+
+docker-up:
+	docker compose up -d --build
+
+docker-down:
+	docker compose down
+
+docker-logs:
+	docker compose logs -f web
+
+docker-cli:
+	docker build -f deploy/Dockerfile -t growth-pilot-agent .
 	docker run --rm -it -v $(PWD)/data:/app/data growth-pilot-agent
+
+web:
+	uv run uvicorn src.web:app --host 0.0.0.0 --port 8000 --reload

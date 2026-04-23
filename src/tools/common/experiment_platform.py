@@ -12,7 +12,10 @@ from typing import Any
 import numpy as np
 from scipy import stats as sp_stats
 
+from src.tools.registry import ToolRegistry
 
+
+@ToolRegistry.register("experiment_platform")
 class ExperimentPlatform:
     """Design, analyze, and monitor A/B/n experiments.
 

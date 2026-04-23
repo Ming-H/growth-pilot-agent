@@ -9,7 +9,10 @@ from __future__ import annotations
 import numpy as np
 from typing import Any
 
+from src.tools.registry import ToolRegistry
 
+
+@ToolRegistry.register("rta_strategy")
 class RTAStrategy:
     """Real-Time API bidding strategy engine.
 

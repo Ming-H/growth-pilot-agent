@@ -1,12 +1,12 @@
-"""ProspectAgent - User prospecting, scoring, segmentation and LTV prediction."""
+"""ProspectExpert - User prospecting, scoring, segmentation and LTV prediction."""
 
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from src.core.base import BaseAgent
-from src.core.state import AgentState
+from src.core.expert import ExpertAgentBase
+from src.prompts.templates.agent_prompts import ProspectPrompt
 
 logger = logging.getLogger(__name__)
 
@@ -29,44 +29,83 @@ except ImportError:
     FeatureEngine = IntentModel = UserScorer = UserSegmentor = LVTPredictor = _Stub
 
 
-SYSTEM_PROMPT = """\
-你是 GrowthPilot 潜客识别 Agent。你的职责是：
-1. 基于用户行为数据构建特征
-2. 预测用户转化意向
-3. 对用户进行评分和排序
-4. 预测用户生命周期价值 (LTV)
-5. 对用户进行分层
+# ---------------------------------------------------------------------------
+# Keyword set for can_handle routing
+# ---------------------------------------------------------------------------
+_PROSPECT_KEYWORDS: list[str] = [
+    "潜客",
+    "新客",
+    "用户评分",
+    "分群",
+    "LTV",
+    "意图",
+    "prospect",
+    "scoring",
+    "segment",
+]
 
-请用 JSON 格式输出分析结果。
-"""
 
-
-class ProspectAgent(BaseAgent):
+class ProspectExpert(ExpertAgentBase):
     """Identifies and scores potential high-value users for freight services."""
 
     name = "prospect"
     description = "潜客识别与评分 Agent"
 
-    def __init__(self, llm: Any, system_prompt: str = SYSTEM_PROMPT) -> None:
-        super().__init__(llm=llm, system_prompt=system_prompt)
-        self._feature_engine = FeatureEngine()
-        self._intent_model = IntentModel()
-        self._scorer = UserScorer()
-        self._segmentor = UserSegmentor()
-        self._ltv_predictor = LVTPredictor()
+    # ------------------------------------------------------------------
+    # ExpertAgentBase abstract implementations
+    # ------------------------------------------------------------------
 
-    async def run(self, state: AgentState) -> dict[str, Any]:
+    def _init_tools(self) -> dict[str, Any]:
+        """Initialize and return deterministic tool instances as a dict."""
+        return {
+            "feature_engine": FeatureEngine(),
+            "intent_model": IntentModel(),
+            "scorer": UserScorer(),
+            "segmentor": UserSegmentor(),
+            "ltv_predictor": LVTPredictor(),
+        }
+
+    def _get_system_prompt(self) -> str:
+        """Return the prospect expert's system prompt for LLM synthesis."""
+        template = ProspectPrompt()
+        return f"{template.role_definition}\n\n{template.business_context}"
+
+    def can_handle(self, query: str) -> float:
+        """Return confidence score (0-1) for handling this query."""
+        query_lower = query.lower()
+        match_count = sum(1 for kw in _PROSPECT_KEYWORDS if kw.lower() in query_lower)
+        if match_count == 0:
+            return 0.0
+        # Scale: 1 match -> 0.6, 2+ matches -> 0.8, 3+ -> 1.0
+        if match_count >= 3:
+            return 1.0
+        if match_count >= 2:
+            return 0.8
+        return 0.6
+
+    # ------------------------------------------------------------------
+    # Main deterministic pipeline
+    # ------------------------------------------------------------------
+
+    def _execute_pipeline(self, params: dict) -> dict:
         """Execute the prospect analysis pipeline.
 
-        Returns a partial state update containing ``prospect_results``.
+        Returns a flat dict with pipeline results.
         """
         errors: list[str] = []
-        data_path = state.get("data_path", "")
+        data_path = params.get("data_path", "")
+
+        # Unpack tools from the initialized dict
+        feature_engine = self._tools["feature_engine"]
+        intent_model = self._tools["intent_model"]
+        scorer = self._tools["scorer"]
+        segmentor = self._tools["segmentor"]
+        ltv_predictor = self._tools["ltv_predictor"]
 
         # 1. Build features
         try:
             raw_data = self._load_data(data_path)
-            features = self._feature_engine.build_feature_matrix(raw_data)
+            features = feature_engine.build_feature_matrix(raw_data)
             user_count = len(features)
         except Exception as exc:
             logger.warning("FeatureEngine failed: %s", exc)
@@ -84,8 +123,8 @@ class ProspectAgent(BaseAgent):
 
                 rng = np.random.RandomState(42)
                 synthetic_labels = (rng.rand(user_count) < 0.08).astype(int)
-                intent_metrics = self._intent_model.train(features, synthetic_labels)
-                intent_scores = self._intent_model.predict(features)
+                intent_metrics = intent_model.train(features, synthetic_labels)
+                intent_scores = intent_model.predict(features)
             except Exception as exc:
                 logger.warning("IntentModel failed: %s", exc)
                 intent_scores = None
@@ -100,8 +139,8 @@ class ProspectAgent(BaseAgent):
                 # Train LTV model with synthetic targets if needed
                 rng = np.random.RandomState(42)
                 synthetic_ltv = rng.exponential(scale=200, size=user_count)
-                self._ltv_predictor.train(features, synthetic_ltv)
-                ltv_predictions = self._ltv_predictor.predict_ltv(features)
+                ltv_predictor.train(features, synthetic_ltv)
+                ltv_predictions = ltv_predictor.predict_ltv(features)
             except Exception as exc:
                 logger.warning("LVTPredictor failed: %s", exc)
                 ltv_predictions = None
@@ -112,12 +151,12 @@ class ProspectAgent(BaseAgent):
         top_users: list = []
         if intent_scores is not None and ltv_predictions is not None:
             try:
-                user_scores_df = self._scorer.score_users(
+                user_scores_df = scorer.score_users(
                     intent_scores=intent_scores.values,
                     ltv_predictions=ltv_predictions.values,
                     user_ids=features.index if features is not None else None,
                 )
-                ranked = self._scorer.rank_users(user_scores_df)
+                ranked = scorer.rank_users(user_scores_df)
                 top_users = ranked.head(100).to_dict("records")
             except Exception as exc:
                 logger.warning("UserScorer failed: %s", exc)
@@ -128,7 +167,7 @@ class ProspectAgent(BaseAgent):
         segment_summary: dict = {}
         if user_scores_df is not None:
             try:
-                segments = self._scorer.segment_by_score(user_scores_df)
+                segments = scorer.segment_by_score(user_scores_df)
                 segment_summary = {
                     name: {
                         "count": len(seg),
@@ -145,49 +184,77 @@ class ProspectAgent(BaseAgent):
         if features is not None and user_count > 0:
             try:
                 import pandas as pd
+                import numpy as np
 
                 # Create user_data for RFM from features
                 user_data = features.copy()
                 if "user_id" not in user_data.columns:
                     user_data = user_data.reset_index().rename(columns={"index": "user_id"})
-                rfm_result = self._segmentor.combined_segmentation(user_data).to_dict("index")
+                # Replace inf/na with finite defaults so RFM quantile binning works
+                numeric_cols = user_data.select_dtypes(include=[np.number]).columns
+                user_data[numeric_cols] = user_data[numeric_cols].replace(
+                    [float("inf"), float("-inf")], np.nan
+                )
+                user_data[numeric_cols] = user_data[numeric_cols].fillna(0)
+                if len(user_data) > 0:
+                    rfm_result = segmentor.combined_segmentation(user_data).to_dict("index")
             except Exception as exc:
                 logger.warning("RFM segmentation failed: %s", exc)
 
-        # 6. LLM synthesis
-        try:
-            prompt = self._build_prospect_prompt(
-                user_count=user_count,
-                intent_metrics=intent_metrics,
-                segment_summary=segment_summary,
-                rfm_segments=len(rfm_result),
-                state=state,
-            )
-            llm_response = await self._invoke_llm(prompt)
-            analysis = self._parse_json_response(llm_response)
-        except Exception as exc:
-            logger.warning("Prospect LLM synthesis failed: %s", exc)
-            analysis = {"summary": "LLM synthesis unavailable"}
-            errors.append(f"LLM synthesis: {exc}")
-
+        # Build flat result dict (no wrapping in {"prospect_results": ...})
         result: dict[str, Any] = {
-            "prospect_results": {
-                "user_count": user_count,
-                "intent_metrics": intent_metrics,
-                "segment_summary": segment_summary,
-                "rfm_result_count": len(rfm_result),
-                "top_users_sample": top_users[:10] if top_users else [],
-                "analysis": analysis,
-            },
+            "user_count": user_count,
+            "intent_metrics": intent_metrics,
+            "segment_summary": segment_summary,
+            "rfm_result_count": len(rfm_result),
+            "top_users_sample": top_users[:10] if top_users else [],
         }
         if errors:
             result["errors"] = errors
         return result
 
     # ------------------------------------------------------------------
+    # LLM synthesis prompt builder
+    # ------------------------------------------------------------------
+
+    def _build_synthesis_prompt(self, params: dict, results: dict) -> str:
+        """Build the LLM synthesis prompt from pipeline results."""
+        memory_context = params.get("memory_context", {})
+        segment_summary = results.get("segment_summary", {})
+        intent_metrics = results.get("intent_metrics", {})
+
+        # Build segment details string
+        segment_details = []
+        for seg_name, seg_info in segment_summary.items():
+            if isinstance(seg_info, dict):
+                count = seg_info.get("count", 0)
+                ratio = seg_info.get("ratio", 0)
+                segment_details.append(f"  - {seg_name}: {count}人 ({ratio:.1%})")
+            else:
+                segment_details.append(f"  - {seg_name}: {seg_info}")
+
+        confidence_hint = f"{min(1.0, max(0.0, (intent_metrics.get('auc', 0.5) - 0.5) * 2)):.2f}"
+
+        return ProspectPrompt().render(
+            user_query=params.get("query", ""),
+            season=params.get("season", "当前"),
+            seasonal_event=params.get("seasonal_event", "常规运营期"),
+            kpi_baseline=params.get("kpi_baseline", {}),
+            memory_context=memory_context,
+            user_count=results.get("user_count", 0),
+            intent_auc=intent_metrics.get("auc", "N/A"),
+            intent_accuracy=intent_metrics.get("accuracy", "N/A"),
+            rfm_segments=results.get("rfm_result_count", 0),
+            segment_details="\n".join(segment_details) if segment_details else "  - 无分群数据",
+            confidence_hint=confidence_hint,
+        )
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-    def _load_data(self, data_path: str) -> dict:
+
+    @staticmethod
+    def _load_data(data_path: str) -> dict:
         """Load raw data for feature engineering.
 
         Uses sample data if no path is provided.
@@ -206,38 +273,3 @@ class ProspectAgent(BaseAgent):
 
         # Generate sample data for demo mode
         return FeatureEngine.generate_sample_data(n_users=500, n_rides=5000)
-
-    def _build_prospect_prompt(
-        self,
-        *,
-        user_count: int,
-        intent_metrics: dict,
-        segment_summary: dict,
-        rfm_segments: int,
-        state: AgentState,
-        **_: Any,
-    ) -> str:
-        context = self._build_prompt_context(state)
-        return f"""\
-{context}
-
-## 潜客识别分析数据
-
-- 用户总数: {user_count}
-- 意向模型 AUC: {intent_metrics.get('auc', 'N/A')}
-- 意向模型 Accuracy: {intent_metrics.get('accuracy', 'N/A')}
-- 用户分层: {segment_summary}
-- RFM 分层用户数: {rfm_segments}
-
-请基于以上数据，给出潜客识别的综合分析和策略建议：
-1. 高潜用户画像特征
-2. 转化意向分析
-3. 分层运营建议
-
-请以 JSON 格式输出:
-{{
-  "summary": "总体概述",
-  "high_value_profile": "高价值用户画像",
-  "intent_insight": "转化意向洞察",
-  "segment_strategy": "分层运营建议"
-}}"""

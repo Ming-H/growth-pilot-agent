@@ -1,17 +1,15 @@
-"""Agent registry - export all agents for convenient access."""
+"""Agent registry - export all expert agents for convenient access."""
 
-from src.agents.prospect import ProspectAgent
-from src.agents.conversion import ConversionAgent
-from src.agents.subsidy import SubsidyAgent
-from src.agents.retention import RetentionAgent
-from src.agents.ad import AdAgent
-from src.agents.orchestrator import OrchestratorAgent
+from src.agents.prospect import ProspectExpert
+from src.agents.conversion import ConversionExpert
+from src.agents.subsidy import SubsidyExpert
+from src.agents.retention import RetentionExpert
+from src.agents.ad import AdExpert
 
 __all__ = [
-    "ProspectAgent",
-    "ConversionAgent",
-    "SubsidyAgent",
-    "RetentionAgent",
-    "AdAgent",
-    "OrchestratorAgent",
+    "ProspectExpert",
+    "ConversionExpert",
+    "SubsidyExpert",
+    "RetentionExpert",
+    "AdExpert",
 ]

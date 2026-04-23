@@ -6,6 +6,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from src.core import __version__
 from src.core.state import AgentState
 
 logger = logging.getLogger(__name__)
@@ -290,7 +291,7 @@ class ReportGenerator:
         return "\n".join(lines)
 
     def _footer(self) -> str:
-        return "---\n*GrowthPilot Agent v4.0.0 - Freight Growth Multi-Agent System*"
+        return f"---\n*GrowthPilot Agent v{__version__} - Freight Growth Multi-Agent System*"
 
     # ------------------------------------------------------------------
     # Helpers

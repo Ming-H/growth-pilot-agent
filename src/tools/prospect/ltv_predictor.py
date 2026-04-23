@@ -18,9 +18,12 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from src.tools.registry import ToolRegistry
+
 logger = logging.getLogger(__name__)
 
 
+@ToolRegistry.register("ltv_predictor")
 class LVTPredictor:
     """Predict customer lifetime value and analyse LTV/CAC ratios.
 

@@ -12,6 +12,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.tools.registry import ToolRegistry
+
 logger = logging.getLogger(__name__)
 
 # Default funnel stages for Didi freight
@@ -26,6 +28,7 @@ DEFAULT_FUNNEL_STAGES = [
 ]
 
 
+@ToolRegistry.register("funnel_analyzer")
 class FunnelAnalyzer:
     """Analyze conversion funnel from exposure to first order."""
 

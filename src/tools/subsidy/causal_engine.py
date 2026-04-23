@@ -14,9 +14,12 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from src.tools.registry import ToolRegistry
+
 logger = logging.getLogger(__name__)
 
 
+@ToolRegistry.register("causal_engine")
 class CausalInferenceEngine:
     """Causal inference for subsidy effect estimation."""
 

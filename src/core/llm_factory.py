@@ -16,15 +16,24 @@ def create_llm(
     provider: str | None = None,
     model: str | None = None,
     temperature: float | None = None,
+    tier: str | None = None,
 ) -> BaseChatModel:
     """Create an LLM instance based on configuration.
 
     Supports: openai, deepseek, local (Ollama).
     """
     s = settings or get_settings()
-    p = provider or s.llm_provider
-    m = model or s.llm_model
-    t = temperature if temperature is not None else s.llm_temperature
+
+    # If tier is specified, override provider/model/temperature from tier config
+    if tier is not None and tier in s.model_tiers:
+        tier_config = s.model_tiers[tier]
+        p = provider or tier_config.get("provider", s.llm_provider)
+        m = model or tier_config.get("model", s.llm_model)
+        t = temperature if temperature is not None else tier_config.get("temperature", s.llm_temperature)
+    else:
+        p = provider or s.llm_provider
+        m = model or s.llm_model
+        t = temperature if temperature is not None else s.llm_temperature
 
     if p in ("openai", "deepseek"):
         from langchain_openai import ChatOpenAI
@@ -33,10 +42,19 @@ def create_llm(
         if p == "deepseek" and not base_url:
             base_url = "https://api.deepseek.com"
 
+        # If tier config specifies a base_url, prefer it
+        if tier is not None and tier in s.model_tiers:
+            tier_base_url = s.model_tiers[tier].get("base_url")
+            if tier_base_url:
+                base_url = tier_base_url
+
+        # Allow creation without API key (demo mode);
+        # actual LLM calls will fail gracefully in Agent._invoke_llm
+        api_key = s.llm_api_key or "sk-demo-placeholder"
         return ChatOpenAI(
             model=m,
             temperature=t,
-            api_key=s.llm_api_key or None,
+            api_key=api_key,
             base_url=base_url,
         )
 
@@ -48,17 +66,4 @@ def create_llm(
     raise ValueError(f"Unsupported LLM provider: {p}")
 
 
-def create_llm_with_fallback(settings: Settings | None = None) -> BaseChatModel:
-    """Create LLM with automatic fallback on failure.
 
-    Uses LangChain's fallback mechanism:
-    primary model → fallback model.
-    """
-    s = settings or get_settings()
-    primary = create_llm(s)
-    fallback = create_llm(
-        s,
-        provider=s.fallback_provider,
-        model=s.fallback_model,
-    )
-    return primary.with_fallbacks([fallback])

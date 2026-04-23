@@ -17,10 +17,13 @@ import matplotlib.ticker as mticker
 import numpy as np
 import seaborn as sns
 
+from src.tools.registry import ToolRegistry
+
 # Consistent style
 sns.set_theme(style="whitegrid", font="sans-serif", palette="muted")
 
 
+@ToolRegistry.register("visualizer")
 class Visualizer:
     """Generate charts for growth-pilot metrics."""
 

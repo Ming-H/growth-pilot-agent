@@ -1,12 +1,12 @@
-"""AdAgent - RTA strategy, bid optimization, creative and audience analysis."""
+"""AdExpert - RTA strategy, bid optimization, creative and audience analysis."""
 
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from src.core.base import BaseAgent
-from src.core.state import AgentState
+from src.core.expert import ExpertAgentBase
+from src.prompts.templates.agent_prompts import AdPrompt
 
 logger = logging.getLogger(__name__)
 
@@ -26,43 +26,36 @@ except ImportError:
     RTAStrategy = BidOptimizer = CreativeAnalyzer = AudienceAnalyzer = _Stub
 
 
-SYSTEM_PROMPT = """\
-你是 GrowthPilot 广告投放 Agent。你的职责是：
-1. 分析广告 RTA 策略效果
-2. 优化出价策略
-3. 检测创意疲劳
-4. 分析受众表现
-
-请用 JSON 格式输出分析结果。
-"""
-
-
-class AdAgent(BaseAgent):
+class AdExpert(ExpertAgentBase):
     """Optimizes ad performance through RTA strategy and bid/creative analysis."""
 
     name = "ad"
-    description = "广告投放 Agent"
+    description = "广告投放专家 Agent"
 
-    def __init__(self, llm: Any, system_prompt: str = SYSTEM_PROMPT) -> None:
-        super().__init__(llm=llm, system_prompt=system_prompt)
-        self._rta_strategy = RTAStrategy()
-        self._bid_optimizer = BidOptimizer()
-        self._creative_analyzer = CreativeAnalyzer()
-        self._audience_analyzer = AudienceAnalyzer()
+    def _init_tools(self) -> dict[str, Any]:
+        """Initialize and return deterministic tool instances as a dict."""
+        return {
+            "rta_strategy": RTAStrategy(),
+            "bid_optimizer": BidOptimizer(),
+            "creative_analyzer": CreativeAnalyzer(),
+            "audience_analyzer": AudienceAnalyzer(),
+        }
 
-    async def run(self, state: AgentState) -> dict[str, Any]:
-        """Execute the ad analysis pipeline."""
+    def _execute_pipeline(self, params: dict) -> dict:
+        """Run the deterministic tool pipeline. Returns raw results dict."""
         errors: list[str] = []
-        budget = state.get("budget", 0)
-        prospect = state.get("prospect_results") or {}
+
+        rta_strategy = self._tools["rta_strategy"]
+        bid_optimizer = self._tools["bid_optimizer"]
+        creative_analyzer = self._tools["creative_analyzer"]
+        audience_analyzer = self._tools["audience_analyzer"]
 
         # 1. Analyze RTA strategy
         rta_result: dict = {}
         rta_rules: list = []
         try:
-            # Build sample historical data for RTA analysis
             historical_data = self._build_sample_rta_data()
-            rta_result = self._rta_strategy.build_rta_decision_rules(historical_data)
+            rta_result = rta_strategy.build_rta_decision_rules(historical_data)
             rta_rules = rta_result.get("rules", [])
         except Exception as exc:
             logger.warning("RTAStrategy failed: %s", exc)
@@ -71,18 +64,15 @@ class AdAgent(BaseAgent):
 
         # 2. Optimize bids
         bid_result: dict = {}
-        expected_cpa = 0.0
         try:
-            # Use ecpc_bid for sample optimization
             current_bid = 5.0
             target_cpa = 80.0
             cvr = 0.03
-            optimized_bid = self._bid_optimizer.ecpc_bid(
+            optimized_bid = bid_optimizer.ecpc_bid(
                 current_bid=current_bid,
                 cvr=cvr,
                 target_cpa=target_cpa,
             )
-            expected_cpa = target_cpa
             bid_result = {
                 "original_bid": current_bid,
                 "optimized_bid": round(optimized_bid, 4),
@@ -99,13 +89,14 @@ class AdAgent(BaseAgent):
         fatigue_alerts: list = []
         try:
             sample_creative_data = self._build_sample_creative_data()
-            creative_result = self._creative_analyzer.analyze_creative_performance(
+            creative_result = creative_analyzer.analyze_creative_performance(
                 sample_creative_data,
             )
-            # Check for fatigue indicators
             for c in creative_result.get("underperformers", []):
                 if isinstance(c, dict) and c.get("roi", 0) < 0.5:
-                    fatigue_alerts.append(f"Creative {c.get('creative_id', '?')} shows low ROI: {c.get('roi', 'N/A')}")
+                    fatigue_alerts.append(
+                        f"Creative {c.get('creative_id', '?')} shows low ROI: {c.get('roi', 'N/A')}"
+                    )
         except Exception as exc:
             logger.warning("CreativeAnalyzer failed: %s", exc)
             creative_result = {}
@@ -116,8 +107,7 @@ class AdAgent(BaseAgent):
         expansion_opportunities: list = []
         try:
             sample_audience = self._build_sample_audience_data()
-            audience_result = self._audience_analyzer.analyze_audience(sample_audience)
-            # Extract expansion opportunities from segments
+            audience_result = audience_analyzer.analyze_audience(sample_audience)
             for seg_name, seg_data in audience_result.get("segments", {}).items():
                 if isinstance(seg_data, dict) and seg_data.get("avg_ltv", 0) > 100:
                     expansion_opportunities.append(f"{seg_name}: high-value segment for expansion")
@@ -126,42 +116,68 @@ class AdAgent(BaseAgent):
             audience_result = {}
             errors.append(f"AudienceAnalyzer: {exc}")
 
-        # 5. LLM synthesis
-        try:
-            prompt = self._build_ad_prompt(
-                rta_rules=rta_rules,
-                rta_metrics=rta_result.get("overall_metrics", {}),
-                bid_result=bid_result,
-                expected_cpa=expected_cpa,
-                creative_result=creative_result,
-                fatigue_alerts=fatigue_alerts,
-                audience_result=audience_result,
-                expansion_opportunities=expansion_opportunities,
-                state=state,
-            )
-            llm_response = await self._invoke_llm(prompt)
-            analysis = self._parse_json_response(llm_response)
-        except Exception as exc:
-            logger.warning("Ad LLM synthesis failed: %s", exc)
-            analysis = {"summary": "LLM synthesis unavailable"}
-            errors.append(f"LLM synthesis: {exc}")
-
-        result: dict[str, Any] = {
-            "ad_results": {
-                "rta_rules": rta_rules,
-                "rta_metrics": rta_result.get("overall_metrics", {}),
-                "bid_result": bid_result,
-                "expected_cpa": expected_cpa,
-                "creative_result": creative_result,
-                "fatigue_alerts": fatigue_alerts,
-                "audience_result": audience_result,
-                "expansion_opportunities": expansion_opportunities,
-                "analysis": analysis,
-            },
+        return {
+            "rta_rules": rta_rules,
+            "rta_metrics": rta_result.get("overall_metrics", {}),
+            "bid_result": bid_result,
+            "creative_result": creative_result,
+            "fatigue_alerts": fatigue_alerts,
+            "audience_result": audience_result,
+            "expansion_opportunities": expansion_opportunities,
+            "errors": errors,
         }
-        if errors:
-            result["errors"] = errors
-        return result
+
+    def _build_synthesis_prompt(self, params: dict, results: dict) -> str:
+        """Build the LLM synthesis prompt from pipeline results."""
+        rta_metrics = results.get("rta_metrics", {})
+        rta_win_rate = str(rta_metrics.get("win_rate", "")) if rta_metrics.get("win_rate") else ""
+        rta_impressions = (
+            str(rta_metrics.get("total_impressions", ""))
+            if rta_metrics.get("total_impressions")
+            else ""
+        )
+
+        bid_result = results.get("bid_result", {})
+        bid_summary = ""
+        if bid_result:
+            bid_summary = f"{bid_result.get('original_bid', 'N/A')} -> {bid_result.get('optimized_bid', 'N/A')}"
+
+        fatigue_alerts = results.get("fatigue_alerts", [])
+        fatigue_str = str(fatigue_alerts) if fatigue_alerts else ""
+
+        expansion = results.get("expansion_opportunities", [])
+        expansion_str = str(expansion) if expansion else ""
+
+        return AdPrompt().render(
+            user_query=params.get("query", ""),
+            season=params.get("season", "当前"),
+            kpi_baseline=params.get("kpi_baseline", {}),
+            memory_context=params.get("memory_context", {}),
+            rta_win_rate=rta_win_rate,
+            rta_impressions=rta_impressions,
+            bid_summary=bid_summary,
+            fatigue_alerts=fatigue_str,
+            expansion_opportunities=expansion_str,
+        )
+
+    def _get_system_prompt(self) -> str:
+        """Return the expert's system prompt for LLM synthesis."""
+        template = AdPrompt()
+        return f"{template.role_definition}\n\n{template.business_context}"
+
+    def can_handle(self, query: str) -> float:
+        """Return confidence score (0-1) for handling this query."""
+        keywords = [
+            "广告", "rta", "出价", "竞价", "创意",
+            "投放", "audience", "bid", "creative", "ad",
+        ]
+        query_lower = query.lower()
+        matches = sum(1 for kw in keywords if kw in query_lower)
+        if matches >= 2:
+            return 0.9
+        if matches == 1:
+            return 0.7
+        return 0.0
 
     # ------------------------------------------------------------------
     # Sample data builders (for demo mode when no real data available)
@@ -231,42 +247,3 @@ class AdAgent(BaseAgent):
                 "segment": rng.choice(segments),
             })
         return data
-
-    # ------------------------------------------------------------------
-    def _build_ad_prompt(self, *, state: AgentState, **kw: Any) -> str:
-        context = self._build_prompt_context(state)
-        parts = [context, "", "## 广告投放分析数据"]
-
-        rta_metrics = kw.get("rta_metrics", {})
-        if rta_metrics:
-            parts.append(f"- RTA 整体胜率: {rta_metrics.get('win_rate', 'N/A')}")
-            parts.append(f"- RTA 总曝光: {rta_metrics.get('total_impressions', 'N/A')}")
-
-        bid_result = kw.get("bid_result", {})
-        if bid_result:
-            parts.append(f"- 出价优化: {bid_result.get('original_bid', 'N/A')} -> {bid_result.get('optimized_bid', 'N/A')}")
-
-        fatigue = kw.get("fatigue_alerts", [])
-        if fatigue:
-            parts.append(f"- 创意疲劳告警: {fatigue}")
-
-        expansion = kw.get("expansion_opportunities", [])
-        if expansion:
-            parts.append(f"- 受众拓展机会: {expansion}")
-
-        parts.append("""
-请基于以上数据给出广告投放的综合分析和建议：
-1. RTA 策略评估
-2. 出价优化建议
-3. 创意优化方案
-4. 受众分析洞察
-
-请以 JSON 格式输出:
-{
-  "summary": "总体概述",
-  "rta_assessment": "RTA 策略评估",
-  "bid_optimization": "出价优化建议",
-  "creative_plan": "创意优化方案",
-  "audience_insight": "受众分析洞察"
-}""")
-        return "\n".join(parts)

@@ -37,3 +37,7 @@ class AgentState(TypedDict):
     # Metadata (accumulated via reducer)
     errors: Annotated[list[str], operator.add]
     metadata: Annotated[list[dict[str, Any]], operator.add]
+
+    # Core infrastructure extensions
+    events: Annotated[list[dict[str, Any]], operator.add]  # Execution event stream
+    memory_context: NotRequired[dict[str, Any]]  # Historical memory context

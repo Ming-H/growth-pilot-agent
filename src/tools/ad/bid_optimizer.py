@@ -10,7 +10,10 @@ from typing import Any
 
 import numpy as np
 
+from src.tools.registry import ToolRegistry
 
+
+@ToolRegistry.register("bid_optimizer")
 class BidOptimizer:
     """OCPX (Optimized Cost Per X) bid optimizer.
 
