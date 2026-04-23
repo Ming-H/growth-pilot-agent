@@ -82,7 +82,7 @@ def _route_after_approval(state: AnalysisState) -> str:
 # ---------------------------------------------------------------------------
 
 def build_graph() -> StateGraph:
-    """Build and return the compiled StateGraph DAG.
+    """Build and return the *uncompiled* StateGraph DAG.
 
     Graph structure::
 
@@ -92,7 +92,9 @@ def build_graph() -> StateGraph:
                                       +-> END (rejected)
 
     Returns:
-        A compiled LangGraph StateGraph ready for invocation.
+        An uncompiled ``StateGraph``.  Call ``build_compiled_graph()`` to get
+        a compiled graph with checkpointing and interrupt support, or call
+        ``graph.compile()`` yourself for a bare compilation.
     """
     graph = StateGraph(AnalysisState)
 
@@ -137,9 +139,34 @@ def build_graph() -> StateGraph:
     # Report always goes to END
     graph.add_edge("report", END)
 
-    # Compile and return
-    compiled = graph.compile()
-    logger.info("[build_graph] StateGraph DAG compiled successfully")
+    logger.info("[build_graph] StateGraph DAG wired successfully (not yet compiled)")
+    return graph
+
+
+async def build_compiled_graph():
+    """Build, compile and return the StateGraph DAG with checkpointing.
+
+    This is the preferred entry point for running analyses.  It:
+
+    1. Calls :func:`build_graph` to create the raw ``StateGraph``.
+    2. Obtains a checkpointer via :func:`get_checkpointer`.
+    3. Compiles the graph with ``checkpointer`` and
+       ``interrupt_before=["approval"]`` so that the execution pauses at the
+       approval node, enabling a human-in-the-loop workflow.
+
+    Returns:
+        A compiled LangGraph ``CompiledGraph`` ready for invocation.
+    """
+    from src.graph.checkpoint import get_checkpointer
+
+    graph = build_graph()
+    checkpointer = await get_checkpointer()
+
+    compiled = graph.compile(
+        checkpointer=checkpointer,
+        interrupt_before=["approval"],
+    )
+    logger.info("[build_compiled_graph] Graph compiled with checkpointing and approval interrupt")
     return compiled
 
 
@@ -155,10 +182,13 @@ async def run_analysis(
     scope: str | None = None,
     budget: float | None = None,
     approval_required: bool = False,
+    thread_id: str = "default",
 ) -> dict[str, Any]:
     """Run a complete analysis through the StateGraph DAG.
 
     This is the primary entry point for the graph-based analysis pipeline.
+    The graph is compiled with checkpointing so that execution can pause at
+    the ``approval`` node and resume later via ``thread_id``.
 
     Args:
         query: The user's growth analytics question.
@@ -167,11 +197,13 @@ async def run_analysis(
         scope: Optional scope hint (e.g. "prospect", "full").
         budget: Optional budget for the analysis.
         approval_required: Whether human approval is required before reporting.
+        thread_id: Unique identifier for the checkpoint thread.  Use the same
+            ``thread_id`` when resuming after a human-approval interrupt.
 
     Returns:
         Final AnalysisState dict after the graph completes.
     """
-    compiled_graph = build_graph()
+    compiled_graph = await build_compiled_graph()
 
     initial_state: AnalysisState = {
         "query": query,
@@ -185,5 +217,6 @@ async def run_analysis(
         "status": AnalysisStatus.PENDING,
     }
 
-    result = await compiled_graph.ainvoke(initial_state)
+    config = {"configurable": {"thread_id": thread_id}}
+    result = await compiled_graph.ainvoke(initial_state, config=config)
     return result
