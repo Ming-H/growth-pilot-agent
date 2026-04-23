@@ -21,15 +21,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from src.api_models import (
+    AgentEvent,
     AnalysisListResponse,
     AnalysisPersistedResponse,
     AnalysisResponse,
+    AnalysisStateResponse,
     AnalyzeRequest,
+    ApprovalRequest,
+    ApprovalResponse,
     EventData,
     HealthResponse,
     MemoryClearResponse,
     MemoryEntryResponse,
     MemoryResponse,
+    ResumeResponse,
 )
 from src.auth.dependencies import get_current_user
 from src.auth.jwt import create_access_token
@@ -69,6 +74,10 @@ logger = logging.getLogger(__name__)
 
 _memory_manager: MemoryManager | None = None
 
+# Cached compiled graph for human-in-the-loop endpoints.
+# Built lazily on first access so that the import-time cost is deferred.
+_compiled_graph: Any | None = None
+
 
 def _get_memory() -> MemoryManager:
     """Return the singleton MemoryManager instance."""
@@ -77,6 +86,22 @@ def _get_memory() -> MemoryManager:
         settings = get_settings()
         _memory_manager = MemoryManager(base_path=settings.memory_base_path)
     return _memory_manager
+
+
+async def _get_graph() -> Any:
+    """Return the singleton compiled LangGraph instance (lazy, cached).
+
+    Calls :func:`build_compiled_graph` once and caches the result for the
+    lifetime of the process.  This avoids rebuilding the graph (and
+    re-initialising the checkpointer) on every request.
+    """
+    global _compiled_graph
+    if _compiled_graph is None:
+        from src.graph.graph import build_compiled_graph
+
+        _compiled_graph = await build_compiled_graph()
+        logger.info("Compiled LangGraph initialised and cached")
+    return _compiled_graph
 
 
 # ---------------------------------------------------------------------------
@@ -555,6 +580,166 @@ async def get_analysis(
         raise HTTPException(status_code=404, detail="Analysis not found")
 
     return _analysis_to_response(analysis)
+
+
+# ---------------------------------------------------------------------------
+# Human-in-the-loop endpoints (require auth)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/analyses/{analysis_id}/state", response_model=AnalysisStateResponse)
+async def get_analysis_state(
+    analysis_id: str,
+    user: User = Depends(get_current_user),
+) -> AnalysisStateResponse:
+    """Get the current analysis state from the LangGraph checkpoint.
+
+    Reads the checkpoint state for the given thread_id (analysis_id) and
+    returns key fields such as status, plan, selected_experts, and the
+    list of next nodes the graph would execute.
+    """
+    config = {"configurable": {"thread_id": analysis_id}}
+    graph = await _get_graph()
+
+    state_snapshot = await graph.aget_state(config)
+
+    if state_snapshot is None or state_snapshot.values is None or not state_snapshot.values:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No checkpoint state found for analysis {analysis_id}",
+        )
+
+    values = state_snapshot.values
+    # status may be an enum; coerce to its value string
+    raw_status = values.get("status")
+    status_str = raw_status.value if hasattr(raw_status, "value") else str(raw_status)
+
+    return AnalysisStateResponse(
+        analysis_id=analysis_id,
+        status=status_str,
+        plan=values.get("plan"),
+        selected_experts=values.get("selected_experts"),
+        expert_results=values.get("expert_results"),
+        quality_scores=values.get("quality_scores"),
+        approved=values.get("approved"),
+        approval_required=values.get("approval_required"),
+        final_report=values.get("final_report"),
+        next_nodes=list(state_snapshot.next) if state_snapshot.next else [],
+        raw_state=values,
+    )
+
+
+@router.post("/analyses/{analysis_id}/approve", response_model=ApprovalResponse)
+async def approve_analysis(
+    analysis_id: str,
+    body: ApprovalRequest,
+    user: User = Depends(get_current_user),
+) -> ApprovalResponse:
+    """Submit a human approval decision for a paused analysis.
+
+    If approved is False the analysis is marked as rejected (FAILED) and the
+    graph is *not* resumed.  If approved is True the state is updated and the
+    graph execution resumes from the approval checkpoint.
+    """
+    config = {"configurable": {"thread_id": analysis_id}}
+    graph = await _get_graph()
+
+    # Verify a checkpoint exists
+    state_snapshot = await graph.aget_state(config)
+    if state_snapshot is None or state_snapshot.values is None or not state_snapshot.values:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No checkpoint state found for analysis {analysis_id}",
+        )
+
+    if not body.approved:
+        # Rejection path: update state and return without resuming
+        from src.graph.state import AnalysisStatus
+
+        await graph.aupdate_state(
+            config,
+            {
+                "approved": False,
+                "status": AnalysisStatus.FAILED,
+            },
+        )
+        logger.info(
+            "Analysis %s rejected by user %s (feedback: %s)",
+            analysis_id, user.id, body.feedback,
+        )
+        return ApprovalResponse(
+            analysis_id=analysis_id,
+            approved=False,
+            status="failed",
+            feedback=body.feedback,
+        )
+
+    # Approval path: update state and resume graph execution
+    from src.graph.state import AnalysisStatus
+
+    await graph.aupdate_state(
+        config,
+        {
+            "approved": True,
+            "status": AnalysisStatus.REPORTING,
+        },
+    )
+
+    logger.info(
+        "Analysis %s approved by user %s, resuming execution",
+        analysis_id, user.id,
+    )
+
+    # Resume the graph from the approval checkpoint (None = continue from interrupt)
+    result = await graph.ainvoke(None, config)
+
+    # result is the final state dict after the graph completes
+    final_status = result.get("status") if result else None
+    status_str = final_status.value if hasattr(final_status, "value") else str(final_status)
+
+    return ApprovalResponse(
+        analysis_id=analysis_id,
+        approved=True,
+        status=status_str or "completed",
+        feedback=body.feedback,
+        result=result,
+    )
+
+
+@router.post("/analyses/{analysis_id}/resume", response_model=ResumeResponse)
+async def resume_analysis(
+    analysis_id: str,
+    user: User = Depends(get_current_user),
+) -> ResumeResponse:
+    """Resume a paused/interrupted analysis from its last checkpoint.
+
+    Invokes the graph with ``None`` input so that LangGraph picks up from
+    the point where it was interrupted (e.g. the approval node).
+    """
+    config = {"configurable": {"thread_id": analysis_id}}
+    graph = await _get_graph()
+
+    # Verify a checkpoint exists
+    state_snapshot = await graph.aget_state(config)
+    if state_snapshot is None or state_snapshot.values is None or not state_snapshot.values:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No checkpoint state found for analysis {analysis_id}",
+        )
+
+    logger.info("Resuming analysis %s from checkpoint", analysis_id)
+
+    result = await graph.ainvoke(None, config)
+
+    final_status = result.get("status") if result else None
+    status_str = final_status.value if hasattr(final_status, "value") else str(final_status)
+
+    return ResumeResponse(
+        analysis_id=analysis_id,
+        status=status_str or "completed",
+        final_report=result.get("final_report") if result else None,
+        result=result,
+    )
 
 
 # ---------------------------------------------------------------------------
