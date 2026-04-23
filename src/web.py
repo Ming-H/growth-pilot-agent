@@ -408,8 +408,10 @@ async def analyze_stream(
 ) -> EventSourceResponse:
     """Run a growth analysis with SSE streaming.
 
-    Requires authentication. Yields real-time progress events as each agent
-    starts/completes, followed by the final analysis result.
+    Requires authentication. Yields structured ``agent_event`` SSE events with
+    stage tracking (plan/execute/evaluate/approval/report) and progress.  Also
+    emits legacy ``message`` / ``result`` / ``error`` events for backward
+    compatibility with older consumers.
     """
     # Create Analysis record in running state
     analysis = Analysis(
@@ -429,33 +431,115 @@ async def analyze_stream(
         analysis_id, user.id, user.org_id, request.query,
     )
 
+    def _sse_event(agent_event: AgentEvent) -> dict:
+        """Build an SSE dict for a structured AgentEvent."""
+        return {
+            "event": "agent_event",
+            "data": agent_event.model_dump_json(),
+            "id": f"{analysis_id}-{agent_event.type}",
+            "retry": 15000,
+        }
+
     async def event_generator():
         """Generate SSE events from the workflow execution."""
-        # Yield initial event
-        init_event = EventData(
-            event_type="started",
-            agent="orchestrator",
+        # ── Plan stage ──────────────────────────────────────────────────
+        plan_event = AgentEvent(
+            type="plan",
+            message="Analyzing your request...",
+            progress=0.1,
             data={"run_id": analysis_id, "query": request.query},
         )
-        yield {"event": "message", "data": init_event.model_dump_json()}
+        yield _sse_event(plan_event)
+        # Legacy compat — old consumers expect a ``message`` event
+        yield {
+            "event": "message",
+            "data": EventData(
+                event_type="started",
+                agent="orchestrator",
+                data={"run_id": analysis_id, "query": request.query},
+            ).model_dump_json(),
+        }
 
         start_time = time.monotonic()
         try:
             state = await _run_analysis(request)
             elapsed = time.monotonic() - start_time
 
-            # Stream intermediate events from state
-            events = state.get("events", [])
-            for evt in events:
-                event_data = EventData(
-                    event_type=evt.get("status", "running"),
-                    agent=evt.get("agent", ""),
+            # ── Execute stage — emit per-expert events ─────────────────
+            selected_experts = list(state.get("agents_run", []))
+            if not selected_experts:
+                # Derive from result keys
+                for key in (
+                    "prospect_results",
+                    "conversion_results",
+                    "subsidy_results",
+                    "retention_results",
+                    "ad_results",
+                ):
+                    if state.get(key) is not None:
+                        selected_experts.append(key.replace("_results", ""))
+
+            expert_count = max(len(selected_experts), 1)
+            for idx, expert_name in enumerate(selected_experts):
+                progress = 0.2 + (0.4 * (idx / expert_count))
+                exec_event = AgentEvent(
+                    type="execute",
+                    expert=expert_name,
+                    message=f"Running {expert_name} analysis...",
+                    progress=round(progress, 2),
+                    data={"expert": expert_name, "index": idx, "total": expert_count},
+                )
+                yield _sse_event(exec_event)
+
+            # Stream intermediate events from state (if provided by workflow)
+            for evt in state.get("events", []):
+                progress_event = AgentEvent(
+                    type="progress",
+                    expert=evt.get("agent"),
+                    message=evt.get("message", ""),
+                    progress=0.6,
                     data=evt,
                 )
-                yield {"event": "message", "data": event_data.model_dump_json()}
+                yield _sse_event(progress_event)
 
-            # Build and yield final result
+            # ── Evaluate stage ──────────────────────────────────────────
+            eval_event = AgentEvent(
+                type="evaluate",
+                message="Evaluating quality...",
+                progress=0.7,
+                data={"quality_scores": state.get("quality_scores", {})},
+            )
+            yield _sse_event(eval_event)
+
+            # ── Approval stage ──────────────────────────────────────────
+            approval_event = AgentEvent(
+                type="approval",
+                message="Waiting for approval...",
+                progress=0.8,
+                data={"approved": state.get("approved", True)},
+            )
+            yield _sse_event(approval_event)
+
+            # ── Report stage ────────────────────────────────────────────
+            report_event = AgentEvent(
+                type="report",
+                message="Generating report...",
+                progress=0.9,
+                data={},
+            )
+            yield _sse_event(report_event)
+
+            # ── Complete stage — final result ───────────────────────────
             response = _build_analysis_response(state, analysis_id, request)
+            complete_event = AgentEvent(
+                type="complete",
+                message="Analysis complete",
+                progress=1.0,
+                data=response.model_dump(),
+            )
+            yield _sse_event(complete_event)
+
+            # Legacy compat — emit old-style result event
             final_event = EventData(
                 event_type="result",
                 agent="orchestrator",
@@ -464,7 +548,6 @@ async def analyze_stream(
             yield {"event": "result", "data": final_event.model_dump_json()}
 
             # Update analysis record with results
-            # We need a fresh session since the outer one may be closed
             from src.db.database import get_session_factory
             session_factory = get_session_factory()
             async with session_factory() as update_db:
@@ -500,6 +583,15 @@ async def analyze_stream(
             elapsed = time.monotonic() - start_time
             logger.error("Stream workflow failed: %s", exc)
 
+            # Emit structured error event
+            error_event = AgentEvent(
+                type="error",
+                message=f"Analysis failed: {exc}",
+                progress=0.0,
+                data={"error": str(exc)},
+            )
+            yield _sse_event(error_event)
+
             # Mark analysis as failed
             try:
                 from src.db.database import get_session_factory
@@ -518,12 +610,13 @@ async def analyze_stream(
             except Exception as db_exc:
                 logger.warning("Failed to mark stream analysis as failed: %s", db_exc)
 
-            error_event = EventData(
+            # Legacy compat error event
+            legacy_error = EventData(
                 event_type="failed",
                 agent="orchestrator",
                 data={"error": str(exc)},
             )
-            yield {"event": "error", "data": error_event.model_dump_json()}
+            yield {"event": "error", "data": legacy_error.model_dump_json()}
 
     return EventSourceResponse(event_generator())
 
