@@ -47,6 +47,20 @@ from src.db.database import get_db, init_db
 from src.db.models import Analysis, Organization, User
 from src.memory.manager import MemoryManager
 
+# Rate limiting (optional -- graceful degradation if slowapi is not installed)
+try:
+    from slowapi import Limiter, _rate_limit_exceeded_handler
+    from slowapi.errors import RateLimitExceeded
+    from slowapi.util import get_remote_address
+
+    limiter = Limiter(key_func=get_remote_address)
+    _RATE_LIMITING_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    limiter = None  # type: ignore[assignment]
+    _rate_limit_exceeded_handler = None  # type: ignore[assignment]
+    RateLimitExceeded = None  # type: ignore[assignment, misc]
+    _RATE_LIMITING_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -287,7 +301,9 @@ def _analysis_to_response(a: Analysis) -> AnalysisPersistedResponse:
 
 
 @router.post("/analyze", response_model=AnalysisPersistedResponse)
+@limiter.limit("10/minute")
 async def analyze(
+    http_request: Request,
     request: AnalyzeRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -609,6 +625,11 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Rate limiting (only if slowapi is available)
+    if _RATE_LIMITING_AVAILABLE and limiter is not None:
+        application.state.limiter = limiter
+        application.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
     # Register router
     application.include_router(router)
