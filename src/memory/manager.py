@@ -1,10 +1,13 @@
-"""MemoryManager - Persistent memory with TF-IDF based semantic search.
+"""MemoryManager - Persistent memory with vector semantic search.
 
 Architecture follows a 4-layer pattern:
   1. Extract  - Identify key information from analysis results
-  2. Store    - Persist structured memory entries as JSON
-  3. Retrieve - TF-IDF keyword matching for semantic search
+  2. Store    - Persist structured memory entries (ChromaDB vector store)
+  3. Retrieve - Embedding-based semantic search with recency boosting
   4. Inject   - Build context string for prompt injection
+
+Falls back to a file-based TF-IDF store when ChromaDB or embeddings are
+not available, ensuring the application always starts.
 
 Reference: claude-cookbooks MemoryToolHandler (filesystem persistence)
            + ai-app-lab longterm_memory (extract-store-retrieve-inject)
@@ -23,8 +26,11 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Default org_id used when callers do not supply one (backward compat).
+_DEFAULT_ORG_ID = "default"
+
 # ---------------------------------------------------------------------------
-# Chinese + English tokenization helper
+# Chinese + English tokenization helper (used by TF-IDF fallback)
 # ---------------------------------------------------------------------------
 
 # Match individual Chinese characters or runs of alphanumeric words
@@ -78,7 +84,7 @@ def _filter_tokens(tokens: list[str]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# TF-IDF computation
+# TF-IDF computation (fallback mode)
 # ---------------------------------------------------------------------------
 
 def _compute_tf(tokens: list[str]) -> dict[str, float]:
@@ -146,10 +152,14 @@ def _tfidf_score(
 # ---------------------------------------------------------------------------
 
 class MemoryManager:
-    """File-based persistent memory manager with TF-IDF semantic search.
+    """Persistent memory manager with vector semantic search.
+
+    Uses ChromaDB + OpenAI embeddings when available.  Falls back to a
+    file-based TF-IDF store when those dependencies are missing.
 
     Memory entries are stored as a single JSON file (``memory_store.json``)
-    under the configured base path.  Each entry contains:
+    under the configured base path when in fallback mode.  Each entry
+    contains:
       - id:        unique UUID
       - run_id:    the analysis run identifier
       - query:     original user query
@@ -157,19 +167,52 @@ class MemoryManager:
       - results_summary:  summary dict from the analysis
       - timestamp: epoch seconds when stored
 
-    The search method uses TF-IDF cosine similarity for retrieval.
+    The public API is the same regardless of which backend is active.
     """
 
     _STORE_FILENAME = "memory_store.json"
 
-    def __init__(self, base_path: str = "./data/memory") -> None:
+    def __init__(self, base_path: str = "./data/memory", org_id: str | None = None) -> None:
         self.base_path = Path(base_path).resolve()
         self.base_path.mkdir(parents=True, exist_ok=True)
         self._store_path = self.base_path / self._STORE_FILENAME
+        self._org_id = org_id or _DEFAULT_ORG_ID
+
+        # Attempt to initialise the vector store backend
+        self._vector_store = None
+        self._use_vector = False
+        self._init_vector_store()
+
+        # TF-IDF fallback entries (always loaded so count/clear work)
         self._entries: list[dict[str, Any]] = self._load()
 
+    def _init_vector_store(self) -> None:
+        """Try to set up the ChromaDB vector store.  On failure, silently
+        fall back to TF-IDF file mode."""
+        try:
+            from src.memory.embedding import get_embeddings, is_fallback
+
+            embeddings = get_embeddings()
+            if embeddings is None or is_fallback():
+                logger.info("Embeddings unavailable – using TF-IDF fallback for memory.")
+                return
+
+            from src.memory.vector_store import VectorMemoryStore
+
+            chroma_dir = str(self.base_path.parent / "chroma")
+            self._vector_store = VectorMemoryStore(persist_dir=chroma_dir)
+            self._use_vector = True
+            logger.info("Vector memory backend active (ChromaDB at %s)", chroma_dir)
+        except Exception as exc:
+            logger.info(
+                "Vector store unavailable (%s) – using TF-IDF fallback for memory.",
+                exc,
+            )
+            self._vector_store = None
+            self._use_vector = False
+
     # ------------------------------------------------------------------
-    # Persistence (Extract + Store layers)
+    # Persistence (TF-IDF fallback – Extract + Store layers)
     # ------------------------------------------------------------------
 
     def _load(self) -> list[dict[str, Any]]:
@@ -235,21 +278,67 @@ class MemoryManager:
             "timestamp": time.time(),
         }
 
+        # Always keep in-memory list for get_recent/count/clear compatibility
         self._entries.append(entry)
         self._save()
 
+        # Also persist to vector store if available
+        if self._use_vector and self._vector_store is not None:
+            try:
+                import asyncio
+
+                summary_str = (
+                    json.dumps(summary_data, ensure_ascii=False)
+                    if isinstance(summary_data, (dict, list))
+                    else summary_data
+                )
+                # Run the async store in a synchronous context
+                try:
+                    loop = asyncio.get_running_loop()
+                    # We're inside an existing event loop – schedule it
+                    import concurrent.futures
+
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        future = pool.submit(
+                            asyncio.run,
+                            self._vector_store.store(
+                                org_id=self._org_id,
+                                query=query,
+                                summary=summary_str,
+                                results=summary_data,
+                                tags=[scope],
+                            ),
+                        )
+                        future.result(timeout=10)
+                except RuntimeError:
+                    # No running loop – safe to use asyncio.run
+                    asyncio.run(
+                        self._vector_store.store(
+                            org_id=self._org_id,
+                            query=query,
+                            summary=summary_str,
+                            results=summary_data,
+                            tags=[scope],
+                        )
+                    )
+            except Exception as exc:
+                logger.warning("Vector store write failed: %s", exc)
+
         logger.info(
-            "Memory stored: id=%s run_id=%s scope=%s",
-            entry_id, run_id, scope,
+            "Memory stored: id=%s run_id=%s scope=%s vector=%s",
+            entry_id, run_id, scope, self._use_vector,
         )
         return entry_id
 
     # ------------------------------------------------------------------
-    # Public API - Retrieve (TF-IDF search)
+    # Public API - Retrieve
     # ------------------------------------------------------------------
 
     def search(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
-        """Search for relevant memory entries using TF-IDF cosine similarity.
+        """Search for relevant memory entries.
+
+        Uses the vector store (ChromaDB) when available, otherwise falls
+        back to TF-IDF cosine similarity.
 
         Args:
             query: Search query text.
@@ -258,7 +347,102 @@ class MemoryManager:
         Returns:
             List of memory entries sorted by relevance (most relevant first).
         """
-        if not self._entries or not query:
+        if not query:
+            return []
+
+        # --- Vector search path ---
+        if self._use_vector and self._vector_store is not None:
+            try:
+                import asyncio
+
+                try:
+                    loop = asyncio.get_running_loop()
+                    import concurrent.futures
+
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        future = pool.submit(
+                            asyncio.run,
+                            self._vector_store.search(
+                                org_id=self._org_id,
+                                query=query,
+                                top_k=limit,
+                            ),
+                        )
+                        vector_results = future.result(timeout=10)
+                except RuntimeError:
+                    vector_results = asyncio.run(
+                        self._vector_store.search(
+                            org_id=self._org_id,
+                            query=query,
+                            top_k=limit,
+                        )
+                    )
+
+                if vector_results:
+                    return self._enrich_vector_results(vector_results, limit)
+            except Exception as exc:
+                logger.warning("Vector search failed, falling back to TF-IDF: %s", exc)
+
+        # --- TF-IDF fallback path ---
+        return self._tfidf_search(query, limit)
+
+    def _enrich_vector_results(
+        self,
+        vector_results: list[dict[str, Any]],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """Convert vector store results to the public format with recency boost."""
+        enriched: list[dict[str, Any]] = []
+
+        for item in vector_results:
+            content = item.get("content", "")
+            meta = item.get("metadata", {})
+            distance = item.get("distance", 1.0)
+
+            # ChromaDB cosine distance: 0 = identical, 2 = opposite
+            # Convert to similarity score [0, 1]
+            similarity = max(0.0, 1.0 - distance / 2.0)
+
+            # Recency boost (same logic as TF-IDF path)
+            ts = meta.get("timestamp", 0)
+            age_seconds = time.time() - ts if ts else float("inf")
+            recency_boost = 1.0 / (1.0 + age_seconds / 86400)
+
+            final_score = similarity * (1 + recency_boost)
+
+            # Try to find the matching local entry for richer data
+            local_entry = self._find_local_entry(meta, content)
+
+            enriched.append({
+                **local_entry,
+                "content": content,
+                "_relevance_score": round(final_score, 4),
+                "_source": "vector",
+            })
+
+        enriched.sort(key=lambda x: x["_relevance_score"], reverse=True)
+        return enriched[:limit]
+
+    def _find_local_entry(
+        self,
+        meta: dict[str, Any],
+        content: str,
+    ) -> dict[str, Any]:
+        """Try to match a vector result to a local file entry for richer data."""
+        for entry in self._entries:
+            if content.startswith(entry.get("query", "")):
+                return dict(entry)
+        return {
+            "id": meta.get("id", ""),
+            "query": content.split("\n")[0] if content else "",
+            "scope": "",
+            "results_summary": meta.get("results_summary", ""),
+            "timestamp": meta.get("timestamp", 0),
+        }
+
+    def _tfidf_search(self, query: str, limit: int) -> list[dict[str, Any]]:
+        """TF-IDF cosine similarity search (fallback)."""
+        if not self._entries:
             return []
 
         # Tokenize the query
@@ -396,12 +580,26 @@ class MemoryManager:
         count = len(self._entries)
         self._entries = []
         self._save()
+
+        # Also clear vector store
+        if self._use_vector and self._vector_store is not None:
+            try:
+                vector_count = self._vector_store.clear(self._org_id)
+                logger.info("Vector store cleared: %d entries removed", vector_count)
+            except Exception as exc:
+                logger.warning("Vector store clear failed: %s", exc)
+
         logger.info("Memory cleared: %d entries removed", count)
         return count
 
     def count(self) -> int:
         """Return the total number of stored memory entries."""
         return len(self._entries)
+
+    @property
+    def uses_vector_store(self) -> bool:
+        """Return True if the ChromaDB vector backend is active."""
+        return self._use_vector
 
     @staticmethod
     def _entry_searchable_text(entry: dict[str, Any]) -> str:
