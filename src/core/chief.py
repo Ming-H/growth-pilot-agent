@@ -27,6 +27,7 @@ import json
 import logging
 import time
 import uuid
+import warnings
 from typing import Any, Callable
 
 from langchain_core.language_models import BaseChatModel
@@ -225,6 +226,13 @@ class GrowthPilotAgent:
     ) -> dict[str, Any]:
         """Execute the four-phase analysis cycle.
 
+        .. deprecated::
+            Use :func:`src.graph.graph.run_analysis` instead.
+            The LangGraph-based DAG in ``src/graph/graph.py`` replaces this
+            manual ReAct loop with a compiled StateGraph that supports
+            checkpointing, human-in-the-loop approval, and circuit-breaker
+            integration.
+
         Args:
             query: User's analysis question.
             data_path: Optional path to data file.
@@ -233,6 +241,12 @@ class GrowthPilotAgent:
             on_event: Optional callback invoked after each notable event.
                       Receives a dict with ``type``, ``expert``, ``summary``, etc.
         """
+        warnings.warn(
+            "ChiefAgent ReAct loop is deprecated. "
+            "Use src.graph.graph.run_analysis() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         errors: list[str] = []
         events: list[dict[str, Any]] = []
         traces: list[TraceEntry] = []

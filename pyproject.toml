@@ -11,6 +11,7 @@ requires-python = ">=3.12"
 dependencies = [
     # Agent framework
     "langgraph>=0.2",
+    "langgraph-checkpoint>=0.1",
     "langchain-core>=0.3",
     # LLM
     "openai>=1.30",
@@ -55,6 +56,8 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.41b0",
     # Rate limiting
     "slowapi>=0.1.9",
+    # Vector memory
+    "chromadb>=0.5",
 ]
 
 [project.optional-dependencies]
