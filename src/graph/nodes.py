@@ -102,9 +102,26 @@ async def plan_node(state: AnalysisState) -> dict:  # noqa: D401
         dict with keys ``plan``, ``selected_experts``, ``status``.
     """
     from src.core.llm_factory import create_llm
+    from src.guardrails.input_guard import validate_input
 
     query = state.get("query", "")
     scope = state.get("scope") or ""
+    budget = state.get("budget")
+
+    # ── Input guardrail ──────────────────────────────────────────────────
+    guard_result = validate_input(query, budget)
+    if not guard_result.passed:
+        logger.warning("[plan_node] Input guardrail rejected: %s", guard_result.reason)
+        return {
+            "plan": {
+                "reasoning": f"Input rejected: {guard_result.reason}",
+                "experts": [],
+                "context_summary": "",
+            },
+            "selected_experts": [],
+            "status": AnalysisStatus.FAILED,
+        }
+    query = guard_result.sanitized_input
 
     try:
         llm = create_llm(tier="default")
@@ -498,6 +515,19 @@ Be concise but specific. Use data and metrics from the expert results.
         final_report = f"# Analysis Report\n\n## Query\n{query}\n\n## Expert Findings\n{findings}\n"
         token_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
         cost_usd = 0.0
+
+    # ── Output guardrail ─────────────────────────────────────────────────
+    from src.guardrails.output_guard import validate_output
+
+    output_guard = validate_output(final_report)
+    if not output_guard.passed:
+        logger.warning("[report_node] Output guardrail rejected: %s", output_guard.reason)
+        # Truncate or replace the report with a safe version
+        final_report = (
+            f"# Analysis Report\n\n"
+            f"## Query\n{query}\n\n"
+            f"*Report generation completed but output was filtered: {output_guard.reason}.*\n"
+        )
 
     return {
         "final_report": final_report,
