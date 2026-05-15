@@ -255,8 +255,9 @@ async def execute_node(state: AnalysisState) -> dict:  # noqa: D401
     """Parallel expert execution.
 
     Reads ``plan`` and ``selected_experts`` to dispatch work to the relevant
-    ExpertAgent subclasses.  Results are appended via the ``expert_results``
-    reducer (operator.add) so that parallel branches merge automatically.
+    ExpertAgent subclasses.  Results are merged via the ``expert_results``
+    reducer (_replace_by_expert) so that refinement results replace earlier
+    ones for the same expert key.
 
     Returns:
         dict with keys ``expert_results``, ``execution_errors``, ``status``.

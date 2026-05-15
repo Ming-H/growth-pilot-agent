@@ -273,34 +273,19 @@ def _build_analysis_response(
     scope = state.get("scope", request.scope or "full")
     errors = state.get("errors", [])
 
-    # Collect sub-agent results
+    # Collect sub-agent results from the unified expert_results list
     results: dict[str, Any] = {}
-    for key in (
-        "prospect_results",
-        "conversion_results",
-        "subsidy_results",
-        "retention_results",
-        "ad_results",
-    ):
-        val = state.get(key)
-        if val is not None:
-            results[key] = val
+    agents_run: list[str] = []
+    for item in state.get("expert_results", []):
+        expert_name = item.get("expert", "")
+        if expert_name:
+            key = f"{expert_name}_results"
+            results[key] = item
+            if expert_name not in agents_run:
+                agents_run.append(expert_name)
 
     # KPI snapshot
     kpi_snapshot = state.get("kpi_snapshot")
-
-    # Track which agents ran
-    agents_run: list[str] = []
-    for key in (
-        "prospect_results",
-        "conversion_results",
-        "subsidy_results",
-        "retention_results",
-        "ad_results",
-    ):
-        if state.get(key) is not None:
-            agent_name = key.replace("_results", "")
-            agents_run.append(agent_name)
 
     return AnalysisResponse(
         success=len(errors) == 0,

@@ -1,7 +1,7 @@
 """LangGraph StateGraph DAG builder for GrowthPilot.
 
 Builds the conditional DAG that orchestrates:
-plan -> execute -> evaluate -> [refine -> execute | approval -> report | report]
+plan -> execute -> evaluate -> [refine -> evaluate | approval -> report | report]
 
 The compiled graph can be invoked with an AnalysisState dict and will run
 through the full analysis lifecycle with optional quality refinement loops
@@ -37,7 +37,7 @@ def _route_after_evaluate(state: AnalysisState) -> str:
     """Determine the next node after evaluation.
 
     Logic:
-    1. If needs_refinement and refinement_round < MAX -> "execute" (re-run)
+    1. If needs_refinement and refinement_round < MAX -> "refine" (re-evaluate)
     2. Elif approval_required -> "approval"
     3. Else -> "report"
     """

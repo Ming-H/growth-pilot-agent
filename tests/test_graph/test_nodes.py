@@ -43,7 +43,7 @@ class TestPlanNode:
         })
 
         with patch("src.guardrails.input_guard.validate_input") as mock_validate, \
-             patch("src.core.llm_factory.create_llm") as mock_create_llm:
+             patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm:
             mock_validate.return_value = MagicMock(passed=True, sanitized_input=base_state["query"])
             mock_llm = MagicMock()
             mock_llm.ainvoke = AsyncMock(return_value=mock_response)
@@ -80,7 +80,7 @@ class TestPlanNode:
         from src.graph.nodes import plan_node
 
         with patch("src.guardrails.input_guard.validate_input") as mock_validate, \
-             patch("src.core.llm_factory.create_llm") as mock_create_llm:
+             patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm:
             mock_validate.return_value = MagicMock(passed=True, sanitized_input=base_state["query"])
             mock_llm = MagicMock()
             mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM unavailable"))
@@ -109,7 +109,7 @@ class TestPlanNode:
         }
 
         with patch("src.guardrails.input_guard.validate_input") as mock_validate, \
-             patch("src.core.llm_factory.create_llm") as mock_create_llm:
+             patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm:
             mock_validate.return_value = MagicMock(passed=True, sanitized_input=state["query"])
             mock_llm = MagicMock()
             mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM unavailable"))
@@ -427,7 +427,7 @@ class TestReportNode:
         mock_response = MagicMock()
         mock_response.content = "# Analysis Report\n\n## Executive Summary\nGrowth is strong."
 
-        with patch("src.core.llm_factory.create_llm") as mock_create_llm, \
+        with patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm, \
              patch("src.guardrails.output_guard.validate_output") as mock_validate:
             mock_llm = MagicMock()
             mock_llm.ainvoke = AsyncMock(return_value=mock_response)
@@ -455,7 +455,7 @@ class TestReportNode:
         mock_response = MagicMock()
         mock_response.content = "# Report with failures noted"
 
-        with patch("src.core.llm_factory.create_llm") as mock_create_llm, \
+        with patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm, \
              patch("src.guardrails.output_guard.validate_output") as mock_validate:
             mock_llm = MagicMock()
             mock_llm.ainvoke = AsyncMock(return_value=mock_response)
@@ -471,7 +471,7 @@ class TestReportNode:
         """report_node generates a fallback report when LLM fails."""
         from src.graph.nodes import report_node
 
-        with patch("src.core.llm_factory.create_llm") as mock_create_llm, \
+        with patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm, \
              patch("src.guardrails.output_guard.validate_output") as mock_validate:
             mock_llm = MagicMock()
             mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM down"))
@@ -492,7 +492,7 @@ class TestReportNode:
         mock_response = MagicMock()
         mock_response.content = "password=secret123 some report text that is long enough"
 
-        with patch("src.core.llm_factory.create_llm") as mock_create_llm, \
+        with patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm, \
              patch("src.guardrails.output_guard.validate_output") as mock_validate:
             mock_llm = MagicMock()
             mock_llm.ainvoke = AsyncMock(return_value=mock_response)

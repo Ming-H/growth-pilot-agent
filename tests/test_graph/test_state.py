@@ -6,7 +6,7 @@ import operator
 
 import pytest
 
-from src.graph.state import AnalysisState, AnalysisStatus
+from src.graph.state import AnalysisState, AnalysisStatus, _replace_by_expert
 
 
 # ---------------------------------------------------------------------------
@@ -130,64 +130,84 @@ class TestAnalysisStateConstruction:
 
 
 # ---------------------------------------------------------------------------
-# Annotated reducer (operator.add) behaviour
+# Annotated reducer (_replace_by_expert for expert_results, operator.add for errors)
 # ---------------------------------------------------------------------------
 
 
-class TestAnnotatedReducers:
-    """Tests that the operator.add annotation works for list fields."""
+class TestExpertResultsReducer:
+    """Tests for the _replace_by_expert reducer used by expert_results."""
 
-    def test_expert_results_reducer_adds(self):
-        """Simulate LangGraph merging expert_results from parallel branches."""
-        base: list[dict] = [{"expert": "prospect", "score": 0.9}]
-        incoming: list[dict] = [{"expert": "conversion", "score": 0.8}]
-        merged = operator.add(base, incoming)
+    def test_new_expert_appended(self):
+        """A new expert's result is appended to existing results."""
+        base = [{"expert": "prospect", "score": 0.9}]
+        incoming = [{"expert": "conversion", "score": 0.8}]
+        merged = _replace_by_expert(base, incoming)
         assert len(merged) == 2
-        assert merged[0]["expert"] == "prospect"
-        assert merged[1]["expert"] == "conversion"
-
-    def test_execution_errors_reducer_adds(self):
-        """Simulate LangGraph merging execution_errors from parallel branches."""
-        base: list[str] = ["prospect: timeout"]
-        incoming: list[str] = ["retention: connection error"]
-        merged = operator.add(base, incoming)
-        assert len(merged) == 2
-        assert "prospect: timeout" in merged
-        assert "retention: connection error" in merged
-
-    def test_expert_results_reducer_empty_plus_results(self):
-        """Adding results to an empty list works."""
-        base: list[dict] = []
-        incoming: list[dict] = [{"expert": "ad", "success": True}]
-        merged = operator.add(base, incoming)
-        assert len(merged) == 1
-
-    def test_expert_results_reducer_results_plus_empty(self):
-        """Adding an empty list preserves existing results."""
-        base: list[dict] = [{"expert": "ad", "success": True}]
-        incoming: list[dict] = []
-        merged = operator.add(base, incoming)
-        assert len(merged) == 1
-
-    def test_multiple_parallel_branches_merge(self):
-        """Three parallel branches all merge correctly."""
-        results_a: list[dict] = [{"expert": "prospect"}]
-        results_b: list[dict] = [{"expert": "conversion"}]
-        results_c: list[dict] = [{"expert": "subsidy"}]
-        merged = operator.add(operator.add(results_a, results_b), results_c)
-        assert len(merged) == 3
         experts = {r["expert"] for r in merged}
-        assert experts == {"prospect", "conversion", "subsidy"}
+        assert experts == {"prospect", "conversion"}
 
-    def test_annotation_type_is_operator_add(self):
-        """Verify that the Annotated type hint uses operator.add."""
+    def test_existing_expert_replaced(self):
+        """A re-run expert replaces its old result instead of duplicating."""
+        base = [{"expert": "prospect", "score": 0.5}]
+        incoming = [{"expert": "prospect", "score": 0.9}]
+        merged = _replace_by_expert(base, incoming)
+        assert len(merged) == 1
+        assert merged[0]["score"] == 0.9
+
+    def test_empty_incoming_preserves_existing(self):
+        """An empty incoming list returns existing results unchanged."""
+        base = [{"expert": "prospect", "score": 0.9}]
+        merged = _replace_by_expert(base, [])
+        assert len(merged) == 1
+
+    def test_empty_base_accepts_new(self):
+        """An empty base accepts new results."""
+        merged = _replace_by_expert([], [{"expert": "ad", "success": True}])
+        assert len(merged) == 1
+
+    def test_mixed_replace_and_append(self):
+        """One replaced, one new, one untouched."""
+        base = [
+            {"expert": "prospect", "score": 0.5},
+            {"expert": "conversion", "score": 0.8},
+        ]
+        incoming = [
+            {"expert": "prospect", "score": 0.9},
+            {"expert": "retention", "score": 0.7},
+        ]
+        merged = _replace_by_expert(base, incoming)
+        assert len(merged) == 3
+        by_expert = {r["expert"]: r for r in merged}
+        assert by_expert["prospect"]["score"] == 0.9  # replaced
+        assert by_expert["conversion"]["score"] == 0.8  # untouched
+        assert by_expert["retention"]["score"] == 0.7  # new
+
+
+class TestExecutionErrorsReducer:
+    """Tests that execution_errors still uses operator.add (always appends)."""
+
+    def test_errors_append(self):
+        base = ["prospect: timeout"]
+        incoming = ["retention: connection error"]
+        merged = operator.add(base, incoming)
+        assert len(merged) == 2
+
+    def test_annotation_type_expert_results(self):
+        """Verify that expert_results uses _replace_by_expert reducer."""
         import typing
-
         hints = typing.get_type_hints(AnalysisState, include_extras=True)
-        # expert_results should be Annotated[list[...], operator.add]
         er_hint = hints.get("expert_results")
         assert er_hint is not None
-        # Annotated type: args are (list[..., ], operator.add)
+        args = typing.get_args(er_hint)
+        assert len(args) == 2
+        assert args[1] is _replace_by_expert
+
+    def test_annotation_type_execution_errors(self):
+        """Verify that execution_errors still uses operator.add."""
+        import typing
+        hints = typing.get_type_hints(AnalysisState, include_extras=True)
+        er_hint = hints.get("execution_errors")
+        assert er_hint is not None
         args = typing.get_args(er_hint)
         assert len(args) == 2
         assert args[1] is operator.add

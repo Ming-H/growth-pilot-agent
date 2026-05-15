@@ -109,7 +109,7 @@ class ResilientLLM:
             try:
                 return await self._fallback.ainvoke(*args, **kwargs)
             except Exception:
-                raise exc from exc
+                raise exc
 
     # -- sync interface ------------------------------------------------------
 
@@ -125,7 +125,7 @@ class ResilientLLM:
             try:
                 return self._fallback.invoke(*args, **kwargs)
             except Exception:
-                raise exc from exc
+                raise exc
 
     # -- proxy all other attributes to primary LLM ---------------------------
 
