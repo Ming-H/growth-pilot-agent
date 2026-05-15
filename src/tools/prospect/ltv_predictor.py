@@ -16,7 +16,6 @@ from typing import Any
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
-from scipy import stats
 
 from src.tools.registry import ToolRegistry
 
@@ -24,18 +23,18 @@ logger = logging.getLogger(__name__)
 
 
 @ToolRegistry.register("ltv_predictor")
-class LVTPredictor:
+class LTVPredictor:
     """Predict customer lifetime value and analyse LTV/CAC ratios.
 
     Typical usage (ML mode)::
 
-        pred = LVTPredictor(method="ml")
+        pred = LTVPredictor(method="ml")
         pred.train(user_features, historical_ltv)
         ltv = pred.predict_ltv(user_features, cohort_history)
 
     Or (probabilistic mode)::
 
-        pred = LVTPredictor(method="probabilistic")
+        pred = LTVPredictor(method="probabilistic")
         ltv = pred.predict_ltv(cohort_data, cohort_data)
     """
 
@@ -122,7 +121,7 @@ class LVTPredictor:
         r2 = float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0
 
         metrics = {"rmse": rmse, "mae": mae, "r2": r2}
-        logger.info("LVTPredictor trained – RMSE=%.2f MAE=%.2f R2=%.4f", rmse, mae, r2)
+        logger.info("LTVPredictor trained – RMSE=%.2f MAE=%.2f R2=%.4f", rmse, mae, r2)
         return metrics
 
     # ------------------------------------------------------------------

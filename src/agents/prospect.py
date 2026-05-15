@@ -16,17 +16,27 @@ logger = logging.getLogger(__name__)
 try:
     from src.tools.prospect.feature_engine import FeatureEngine
     from src.tools.prospect.intent_model import IntentModel
-    from src.tools.prospect.user_scorer import UserScorer
+    from src.tools.prospect.ltv_predictor import LTVPredictor
     from src.tools.prospect.segmentor import UserSegmentor
-    from src.tools.prospect.ltv_predictor import LVTPredictor
-except ImportError:
+    from src.tools.prospect.user_scorer import UserScorer
+except ImportError as _import_err:
+    import logging as _logging
+    _logging.getLogger(__name__).warning("Tool import failed, using stubs: %s", _import_err)
 
     class _Stub:
-        """Minimal stub for tools not yet implemented."""
+        """Stub that raises RuntimeError when any method is called."""
 
-        def __init__(self, *a: Any, **kw: Any) -> None: ...
+        def __init__(self, *a: Any, **kw: Any) -> None:
+            pass
 
-    FeatureEngine = IntentModel = UserScorer = UserSegmentor = LVTPredictor = _Stub
+        def __getattr__(self, name: str) -> Any:
+            def _stub_method(*a: Any, **kw: Any) -> Any:
+                raise RuntimeError(
+                    f"Stub tool: {name}() called but tool is not available (import failed)"
+                )
+            return _stub_method
+
+    FeatureEngine = IntentModel = UserScorer = UserSegmentor = LTVPredictor = _Stub
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +72,7 @@ class ProspectExpert(ExpertAgentBase):
             "intent_model": IntentModel(),
             "scorer": UserScorer(),
             "segmentor": UserSegmentor(),
-            "ltv_predictor": LVTPredictor(),
+            "ltv_predictor": LTVPredictor(),
         }
 
     def _get_system_prompt(self) -> str:
@@ -70,18 +80,10 @@ class ProspectExpert(ExpertAgentBase):
         template = ProspectPrompt()
         return f"{template.role_definition}\n\n{template.business_context}"
 
-    def can_handle(self, query: str) -> float:
+    @staticmethod
+    def can_handle(query: str) -> float:
         """Return confidence score (0-1) for handling this query."""
-        query_lower = query.lower()
-        match_count = sum(1 for kw in _PROSPECT_KEYWORDS if kw.lower() in query_lower)
-        if match_count == 0:
-            return 0.0
-        # Scale: 1 match -> 0.6, 2+ matches -> 0.8, 3+ -> 1.0
-        if match_count >= 3:
-            return 1.0
-        if match_count >= 2:
-            return 0.8
-        return 0.6
+        return ExpertAgentBase._keyword_confidence(query, _PROSPECT_KEYWORDS)
 
     # ------------------------------------------------------------------
     # Main deterministic pipeline
@@ -103,103 +105,104 @@ class ProspectExpert(ExpertAgentBase):
         ltv_predictor = self._tools["ltv_predictor"]
 
         # 1. Build features
-        try:
-            raw_data = self._load_data(data_path)
-            features = feature_engine.build_feature_matrix(raw_data)
-            user_count = len(features)
-        except Exception as exc:
-            logger.warning("FeatureEngine failed: %s", exc)
-            features = None
-            user_count = 0
-            errors.append(f"FeatureEngine: {exc}")
+        raw_data = self._load_data(data_path)
+        features = self._safe_execute(
+            lambda: feature_engine.build_feature_matrix(raw_data),
+            "FeatureEngine", errors, default=None,
+        )
+        user_count = len(features) if features is not None else 0
 
         # 2. Predict intent
         intent_scores: Any = None
         intent_metrics: dict = {}
         if features is not None and user_count > 0:
-            try:
-                # Generate synthetic labels for training if no real labels
-                import numpy as np
+            import numpy as np
 
-                rng = np.random.RandomState(42)
-                synthetic_labels = (rng.rand(user_count) < 0.08).astype(int)
-                intent_metrics = intent_model.train(features, synthetic_labels)
-                intent_scores = intent_model.predict(features)
-            except Exception as exc:
-                logger.warning("IntentModel failed: %s", exc)
-                intent_scores = None
-                errors.append(f"IntentModel: {exc}")
+            rng = np.random.RandomState(42)
+            synthetic_labels = (rng.rand(user_count) < 0.08).astype(int)
+            intent_metrics = self._safe_execute(
+                lambda: intent_model.train(features, synthetic_labels),
+                "IntentModel", errors, default={},
+            )
+            if intent_metrics:
+                intent_scores = self._safe_execute(
+                    lambda: intent_model.predict(features),
+                    "IntentModel", errors, default=None,
+                )
 
         # 3. Predict LTV
         ltv_predictions: Any = None
         if features is not None and user_count > 0:
-            try:
-                import numpy as np
+            import numpy as np
 
-                # Train LTV model with synthetic targets if needed
-                rng = np.random.RandomState(42)
-                synthetic_ltv = rng.exponential(scale=200, size=user_count)
-                ltv_predictor.train(features, synthetic_ltv)
-                ltv_predictions = ltv_predictor.predict_ltv(features)
-            except Exception as exc:
-                logger.warning("LVTPredictor failed: %s", exc)
-                ltv_predictions = None
-                errors.append(f"LVTPredictor: {exc}")
+            # Train LTV model with synthetic targets if needed
+            rng = np.random.RandomState(42)
+            synthetic_ltv = rng.exponential(scale=200, size=user_count)
+            train_ok = self._safe_execute(
+                lambda: ltv_predictor.train(features, synthetic_ltv),
+                "LTVPredictor", errors, default=None,
+            )
+            if train_ok is not None:
+                ltv_predictions = self._safe_execute(
+                    lambda: ltv_predictor.predict_ltv(features),
+                    "LTVPredictor", errors, default=None,
+                )
 
         # 4. Score users
         user_scores_df = None
         top_users: list = []
         if intent_scores is not None and ltv_predictions is not None:
-            try:
-                user_scores_df = scorer.score_users(
+            user_scores_df = self._safe_execute(
+                lambda: scorer.score_users(
                     intent_scores=intent_scores.values,
                     ltv_predictions=ltv_predictions.values,
                     user_ids=features.index if features is not None else None,
+                ),
+                "UserScorer", errors, default=None,
+            )
+            if user_scores_df is not None:
+                ranked = self._safe_execute(
+                    lambda: scorer.rank_users(user_scores_df),
+                    "UserScorer", errors, default=None,
                 )
-                ranked = scorer.rank_users(user_scores_df)
-                top_users = ranked.head(100).to_dict("records")
-            except Exception as exc:
-                logger.warning("UserScorer failed: %s", exc)
-                errors.append(f"UserScorer: {exc}")
+                top_users = ranked.head(100).to_dict("records") if ranked is not None else []
 
         # 5. Segment users
         segments = {}
         segment_summary: dict = {}
         if user_scores_df is not None:
-            try:
-                segments = scorer.segment_by_score(user_scores_df)
-                segment_summary = {
-                    name: {
-                        "count": len(seg),
-                        "ratio": len(seg) / max(user_count, 1),
-                    }
-                    for name, seg in segments.items()
+            segments = self._safe_execute(
+                lambda: scorer.segment_by_score(user_scores_df),
+                "UserSegmentor", errors, default={},
+            )
+            segment_summary = {
+                name: {
+                    "count": len(seg),
+                    "ratio": len(seg) / max(user_count, 1),
                 }
-            except Exception as exc:
-                logger.warning("UserSegmentor failed: %s", exc)
-                errors.append(f"UserSegmentor: {exc}")
+                for name, seg in segments.items()
+            }
 
         # Also do RFM segmentation if data available
         rfm_result = {}
         if features is not None and user_count > 0:
-            try:
-                import pandas as pd
-                import numpy as np
+            import numpy as np
 
-                # Create user_data for RFM from features
-                user_data = features.copy()
-                if "user_id" not in user_data.columns:
-                    user_data = user_data.reset_index().rename(columns={"index": "user_id"})
-                # Replace inf/na with finite defaults so RFM quantile binning works
-                numeric_cols = user_data.select_dtypes(include=[np.number]).columns
-                user_data[numeric_cols] = user_data[numeric_cols].replace(
-                    [float("inf"), float("-inf")], np.nan
+            # Create user_data for RFM from features
+            user_data = features.copy()
+            if "user_id" not in user_data.columns:
+                user_data = user_data.reset_index().rename(columns={"index": "user_id"})
+            # Replace inf/na with finite defaults so RFM quantile binning works
+            numeric_cols = user_data.select_dtypes(include=[np.number]).columns
+            user_data[numeric_cols] = user_data[numeric_cols].replace(
+                [float("inf"), float("-inf")], np.nan
+            )
+            user_data[numeric_cols] = user_data[numeric_cols].fillna(0)
+            if len(user_data) > 0:
+                rfm_result = self._safe_execute(
+                    lambda: segmentor.combined_segmentation(user_data).to_dict("index"),
+                    "RFMSegmentation", errors, default={},
                 )
-                user_data[numeric_cols] = user_data[numeric_cols].fillna(0)
-                if len(user_data) > 0:
-                    rfm_result = segmentor.combined_segmentation(user_data).to_dict("index")
-            except Exception as exc:
-                logger.warning("RFM segmentation failed: %s", exc)
 
         # Build flat result dict (no wrapping in {"prospect_results": ...})
         result: dict[str, Any] = {

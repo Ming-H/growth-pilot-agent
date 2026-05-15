@@ -7,8 +7,8 @@ Provides multi-dimensional evaluation of agent outputs:
 - latency: Response time tracking
 """
 
-from src.evals.evaluator import AgentEvaluator, EvalResult
 from src.evals.dataset import EvalDataset, EvalSample
+from src.evals.evaluator import AgentEvaluator, EvalResult
 from src.evals.report import EvalReport
 
 __all__ = [

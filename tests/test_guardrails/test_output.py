@@ -63,13 +63,13 @@ class TestValidateOutputShort:
         assert result.passed is False
 
     def test_output_at_boundary(self):
-        """Output with exactly 10 non-whitespace characters passes."""
-        result = validate_output("1234567890")
+        """Output with exactly 50 non-whitespace characters passes."""
+        result = validate_output("a" * 50)
         assert result.passed is True
 
     def test_output_below_boundary(self):
-        """Output with 9 non-whitespace characters is rejected."""
-        result = validate_output("123456789")
+        """Output with 49 non-whitespace characters is rejected."""
+        result = validate_output("a" * 49)
         assert result.passed is False
 
 

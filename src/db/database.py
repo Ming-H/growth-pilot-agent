@@ -1,4 +1,5 @@
 """Database connection and session management."""
+import logging
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (
@@ -9,6 +10,8 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase
 
 from src.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -45,6 +48,19 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
     return _session_factory
 
 
+def dispose_engine() -> None:
+    """Dispose of the engine and session factory (for shutdown/testing)."""
+    global _engine, _session_factory
+    if _engine is not None:
+        import asyncio
+        try:
+            asyncio.get_event_loop().run_until_complete(_engine.dispose())
+        except RuntimeError:
+            pass
+    _engine = None
+    _session_factory = None
+
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency that yields a database session."""
     async with get_session_factory()() as session:
@@ -57,6 +73,18 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db() -> None:
-    """Create all tables. Use Alembic in production."""
-    async with get_engine().begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    """Initialize database tables.
+
+    In demo mode, uses create_all() for convenience.
+    In production, expects Alembic migrations (alembic upgrade head).
+    """
+    s = get_settings()
+    if s.demo_mode:
+        logger.warning("Demo mode: using create_all() for table creation")
+        async with get_engine().begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    else:
+        logger.info("Production mode: tables should be managed via Alembic migrations")
+        # Still ensure tables exist (useful for first-run with empty DB)
+        async with get_engine().begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)

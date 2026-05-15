@@ -133,6 +133,7 @@ class BidOptimizer:
         base_bid: float,
         ctr_curve: dict[str, list[float]],
         cvr_curve: dict[str, list[float]],
+        revenue_per_conversion: float = 80.0,
     ) -> dict[str, Any]:
         """Simulate expected outcomes at different bid levels.
 
@@ -144,6 +145,7 @@ class BidOptimizer:
                        ctr_values: corresponding CTR at each multiplier level.
             cvr_curve: Dict with keys 'bid_multipliers' and 'cvr_values'.
                        cvr_values: corresponding CVR at each multiplier level.
+            revenue_per_conversion: Average revenue per conversion (CNY). Default 80.0.
 
         Returns:
             Dict with:
@@ -178,7 +180,7 @@ class BidOptimizer:
             conversions = int(clicks * cvr)
             spend = clicks * bid_amount
             cpa = spend / conversions if conversions > 0 else float("inf")
-            revenue = conversions * 80.0  # assumed average revenue per conversion
+            revenue = conversions * revenue_per_conversion
             roi = revenue / spend if spend > 0 else 0.0
 
             result = {

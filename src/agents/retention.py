@@ -23,12 +23,22 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 try:
     from src.tools.retention import ChurnPredictor, CohortAnalyzer, NurturePlanner, WinbackPlanner
-except ImportError:
+except ImportError as _import_err:
+    import logging as _logging
+    _logging.getLogger(__name__).warning("Tool import failed, using stubs: %s", _import_err)
 
     class _Stub:
-        """Stub for tools not yet importable."""
+        """Stub that raises RuntimeError when any method is called."""
 
-        def __init__(self, *a: Any, **kw: Any) -> None: ...
+        def __init__(self, *a: Any, **kw: Any) -> None:
+            pass
+
+        def __getattr__(self, name: str) -> Any:
+            def _stub_method(*a: Any, **kw: Any) -> Any:
+                raise RuntimeError(
+                    f"Stub tool: {name}() called but tool is not available (import failed)"
+                )
+            return _stub_method
 
     NurturePlanner = ChurnPredictor = WinbackPlanner = CohortAnalyzer = _Stub  # type: ignore[assignment,misc]
 
@@ -62,20 +72,14 @@ class RetentionExpert(ExpertAgentBase):
         template = RetentionPrompt()
         return f"{template.role_definition}\n\n{template.business_context}"
 
-    def can_handle(self, query: str) -> float:
+    @staticmethod
+    def can_handle(query: str) -> float:
         """Return confidence score (0-1) for handling this query."""
-        keywords = [
+        return ExpertAgentBase._keyword_confidence(query, [
             "留存", "流失", "召回", "挽回", "群组",
             "cohort", "churn", "retention", "nurture", "winback",
             "复购",
-        ]
-        query_lower = query.lower()
-        matches = sum(1 for kw in keywords if kw in query_lower)
-        if matches >= 2:
-            return 0.95
-        if matches == 1:
-            return 0.8
-        return 0.0
+        ])
 
     # ------------------------------------------------------------------
     # Main pipeline
@@ -98,11 +102,13 @@ class RetentionExpert(ExpertAgentBase):
         high_risk_users: list[dict[str, Any]] = []
         churn_factors: list[str] = []
         churn_segments: dict[str, Any] = {}
-        try:
-            X, y = self._load_or_generate_churn_data()
+        X, y = self._load_or_generate_churn_data()
 
-            # Train model
-            train_metrics = churn_predictor.train(X, y)
+        train_metrics = self._safe_execute(
+            lambda: churn_predictor.train(X, y),
+            "ChurnPredictor", errors, default=None,
+        )
+        if train_metrics is not None:
             logger.info(
                 "ChurnPredictor trained: AUC=%.4f AP=%.4f",
                 train_metrics.get("auc", 0),
@@ -110,15 +116,22 @@ class RetentionExpert(ExpertAgentBase):
             )
 
             # Predict churn risk
-            churn_probs = churn_predictor.predict_churn_risk(X)
-
-            # Segment churned users
-            user_features = X.copy()
-            user_features["user_id"] = [f"U{i:05d}" for i in range(len(X))]
-            churn_segments = churn_predictor.segment_churned_users(
-                churn_scores=churn_probs,
-                user_features=user_features,
+            churn_probs = self._safe_execute(
+                lambda: churn_predictor.predict_churn_risk(X),
+                "ChurnPredictor", errors, default=None,
             )
+
+            if churn_probs is not None:
+                # Segment churned users
+                user_features = X.copy()
+                user_features["user_id"] = [f"U{i:05d}" for i in range(len(X))]
+                churn_segments = self._safe_execute(
+                    lambda: churn_predictor.segment_churned_users(
+                        churn_scores=churn_probs,
+                        user_features=user_features,
+                    ),
+                    "ChurnPredictor", errors, default={},
+                )
 
             # Extract summary info
             summary = churn_segments.get("summary", {})
@@ -142,8 +155,7 @@ class RetentionExpert(ExpertAgentBase):
             churn_factors = sorted(fi, key=fi.get, reverse=True)[:5] if fi else [
                 "低活跃度", "无近30天订单", "价格敏感型用户", "竞品使用迹象",
             ]
-        except Exception as exc:
-            logger.warning("ChurnPredictor pipeline failed, using heuristic: %s", exc)
+        else:
             churn_risk = {
                 "high_risk_ratio": 0.12,
                 "medium_risk_ratio": 0.25,
@@ -151,101 +163,106 @@ class RetentionExpert(ExpertAgentBase):
             }
             high_risk_users = [{"user_id": "sample", "risk_score": 0.85}]
             churn_factors = ["低活跃度", "无近30天订单", "价格敏感型用户", "竞品使用迹象"]
-            errors.append(f"ChurnPredictor (heuristic): {exc}")
 
         # 2. Cohort analysis
         cohort_matrix: dict[str, Any] = {}
         retention_curve: dict[str, Any] = {}
         cohort_insight = ""
         inflection_result: dict[str, Any] = {}
-        try:
-            matrix = cohort_analyzer.analyze_retention_cohort(
+        matrix = self._safe_execute(
+            lambda: cohort_analyzer.analyze_retention_cohort(
                 order_data=retention_data,
                 cohort_dim="signup_date",
                 period="W",
-            )
+            ),
+            "CohortAnalyzer", errors, default=None,
+        )
+        if matrix is not None and not matrix.empty:
+            # Convert matrix to serialisable dict
+            cohort_matrix = {
+                str(k): {str(col): round(val, 4) for col, val in row.items() if not pd.isna(val)}
+                for k, row in matrix.to_dict(orient="index").items()
+            }
 
-            if not matrix.empty:
-                # Convert matrix to serialisable dict
-                cohort_matrix = {
-                    str(k): {str(col): round(val, 4) for col, val in row.items() if not pd.isna(val)}
-                    for k, row in matrix.to_dict(orient="index").items()
-                }
-
-                # Analyse first cohort's retention curve for inflection
-                first_cohort = matrix.iloc[0].dropna().values
-                if len(first_cohort) >= 3:
-                    inflection_result = cohort_analyzer.find_retention_inflection(
+            # Analyse first cohort's retention curve for inflection
+            first_cohort = matrix.iloc[0].dropna().values
+            if len(first_cohort) >= 3:
+                inflection_result = self._safe_execute(
+                    lambda: cohort_analyzer.find_retention_inflection(
                         retention_curve=first_cohort,
-                    )
-                    retention_curve = {
-                        f"week_{i}": round(float(v), 4)
-                        for i, v in enumerate(first_cohort)
-                    }
-                    inf_type = inflection_result.get("inflection_type", "unknown")
-                    inf_period = inflection_result.get("inflection_period")
-                    cohort_insight = (
-                        f"首个群组留存分析：拐点出现在第 {inf_period} 周 "
-                        f"(类型: {inf_type})"
-                    )
-                else:
-                    cohort_insight = "数据不足以进行拐点分析"
+                    ),
+                    "CohortAnalyzer", errors, default={},
+                )
+                retention_curve = {
+                    f"week_{i}": round(float(v), 4)
+                    for i, v in enumerate(first_cohort)
+                }
+                inf_type = inflection_result.get("inflection_type", "unknown")
+                inf_period = inflection_result.get("inflection_period")
+                cohort_insight = (
+                    f"首个群组留存分析：拐点出现在第 {inf_period} 周 "
+                    f"(类型: {inf_type})"
+                )
             else:
-                cohort_insight = "群组分析未生成有效数据"
-        except Exception as exc:
-            logger.warning("CohortAnalyzer pipeline failed, using heuristic: %s", exc)
+                cohort_insight = "数据不足以进行拐点分析"
+        elif matrix is not None:
+            cohort_insight = "群组分析未生成有效数据"
+        else:
             cohort_matrix = {"cohort_2024_q1": {"day_7": 0.45, "day_30": 0.28, "day_90": 0.15}}
             retention_curve = {"day_1": 0.75, "day_7": 0.45, "day_30": 0.28, "day_90": 0.15}
             cohort_insight = "近期群组留存率有提升趋势，但30日留存仍需改善"
-            errors.append(f"CohortAnalyzer (heuristic): {exc}")
 
         # 3. Nurture planning
         nurture_plans: dict[str, Any] = {}
         nurture_progress: dict[str, Any] = {}
-        try:
-            nurture_plans = nurture_planner.generate_nurture_plan(
+        nurture_plans = self._safe_execute(
+            lambda: nurture_planner.generate_nurture_plan(
                 new_user_data=None,
                 retention_curves=retention_curve if retention_curve else None,
-            )
-
+            ),
+            "NurturePlanner", errors, default=None,
+        )
+        if nurture_plans is not None:
             # Evaluate nurture progress if cohort data has the right columns
             if "days_since_signup" in retention_data.columns and "is_active" in retention_data.columns:
-                nurture_progress = nurture_planner.evaluate_nurture_progress(
-                    cohort_data=retention_data,
+                nurture_progress = self._safe_execute(
+                    lambda: nurture_planner.evaluate_nurture_progress(
+                        cohort_data=retention_data,
+                    ),
+                    "NurturePlanner", errors, default={},
                 )
             else:
                 nurture_progress = {
                     "overall_health": "sample_data",
                     "note": "Using generated sample data for progress evaluation",
                 }
-        except Exception as exc:
-            logger.warning("NurturePlanner pipeline failed, using heuristic: %s", exc)
+        else:
             nurture_plans = {"active": "weekly_push", "at_risk": "personalized_offer"}
             nurture_progress = {"completion_rate": 0.65, "active_plans": 3}
-            errors.append(f"NurturePlanner (heuristic): {exc}")
 
         # 4. Winback plans
         winback_plans: dict[str, Any] = {}
         winback_priority: list[str] = []
-        try:
-            winback_plans = winback_planner.generate_winback_plan(
+        winback_plans = self._safe_execute(
+            lambda: winback_planner.generate_winback_plan(
                 churn_segments=churn_segments if churn_segments else {
                     "high_risk": {"count": 100},
                     "medium_risk": {"count": 200},
                 },
                 historical_winback_data=None,
-            )
+            ),
+            "WinbackPlanner", errors, default=None,
+        )
+        if winback_plans is not None:
             wb_summary = winback_plans.get("summary", {})
             winback_priority = wb_summary.get("priority_order", [])
-        except Exception as exc:
-            logger.warning("WinbackPlanner.generate_winback_plan failed, using heuristic: %s", exc)
+        else:
             winback_plans = {
                 "high_value_churned": {"action": "大额优惠券+专属客服回访", "budget_share": 0.4},
                 "medium_risk": {"action": "个性化Push+小券引导", "budget_share": 0.35},
                 "low_engagement": {"action": "内容运营+活动邀请", "budget_share": 0.25},
             }
             winback_priority = ["high_value_churned", "medium_risk", "low_engagement"]
-            errors.append(f"WinbackPlanner (heuristic): {exc}")
 
         return {
             "churn_risk": churn_risk,

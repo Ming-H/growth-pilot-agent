@@ -12,7 +12,7 @@ import pytest
 import pytest_asyncio
 
 from src.core.config import Settings, get_settings
-from src.core.state import AgentState
+from src.graph.state import AnalysisState
 
 
 # ---------------------------------------------------------------------------
@@ -48,8 +48,8 @@ def _reset_settings_cache():
 
 
 @pytest.fixture
-def sample_state() -> AgentState:
-    """Provide a minimal valid AgentState for testing."""
+def sample_state() -> dict[str, Any]:
+    """Provide a minimal valid state dict for testing."""
     return {
         "query": "帮我分析最近的货运增长数据",
         "data_path": "/data/test/user_logs.csv",
@@ -59,16 +59,17 @@ def sample_state() -> AgentState:
 
 
 @pytest.fixture
-def enriched_state(sample_state: AgentState) -> AgentState:
-    """Provide an AgentState with sub-agent results populated."""
+def enriched_state(sample_state: dict[str, Any]) -> dict[str, Any]:
+    """Provide a state dict matching AnalysisState schema."""
     state = dict(sample_state)
     state["budget"] = 50000.0
     state["scope"] = "full"
-    state["prospect_results"] = {"user_count": 1200, "high_intent_ratio": 0.15}
-    state["conversion_results"] = {"funnel_result": {"browse_to_click": 0.3}}
-    state["subsidy_results"] = {"expected_roi": 2.5}
-    state["retention_results"] = {"churn_risk": {"high_risk_ratio": 0.08}}
-    state["ad_results"] = {"expected_cpa": 45.0}
+    state["expert_results"] = [
+        {"expert": "prospect", "user_count": 1200, "success": True},
+        {"expert": "subsidy", "expected_roi": 2.5, "success": True},
+        {"expert": "ad", "expected_cpa": 45.0, "success": True},
+    ]
+    state["execution_errors"] = []
     return state
 
 

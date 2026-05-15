@@ -2,17 +2,16 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timezone
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     Float,
     ForeignKey,
     Index,
     Integer,
-    JSON,
     String,
     Text,
 )
@@ -26,7 +25,7 @@ def _uuid() -> str:
 
 
 def _now() -> datetime:
-    return datetime.utcnow()
+    return datetime.now(timezone.utc)
 
 
 # ── Organization ──────────────────────────────────────────────
@@ -39,6 +38,9 @@ class Organization(Base):
     plan: Mapped[str] = mapped_column(String(20), default="free")
     monthly_quota: Mapped[int] = mapped_column(Integer, default=100)
     usage_count: Mapped[int] = mapped_column(Integer, default=0)
+    reset_usage_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, comment="When usage_count was last reset"
+    )
     settings: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
@@ -77,7 +79,9 @@ class Analysis(Base):
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id"), index=True, nullable=False
     )
-    org_id: Mapped[str] = mapped_column(String(36), index=True, nullable=False)
+    org_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id"), index=True, nullable=False
+    )
     query: Mapped[str] = mapped_column(Text, nullable=False)
     scope: Mapped[str] = mapped_column(String(20), default="full")
     budget: Mapped[float] = mapped_column(Float, default=0.0)

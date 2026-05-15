@@ -9,11 +9,24 @@ Provides:
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Type
+from typing import Any, Callable, Protocol, Type, runtime_checkable
 
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Tool protocol
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class ToolProtocol(Protocol):
+    """Standard interface for all tools."""
+
+    name: str
+
+    def execute(self, **kwargs: Any) -> Any: ...
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +167,33 @@ class ToolRegistry:
     def get(cls, name: str) -> Type | None:
         """Get the tool class (not instance) by name."""
         return cls._tools.get(name)
+
+    # ------------------------------------------------------------------
+    # Caching
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def cached(cls, name: str, maxsize: int = 128) -> None:
+        """Wrap a registered tool's ``execute`` method with LRU caching.
+
+        Useful for expensive operations like causal inference that
+        shouldn't be repeated for the same inputs.
+
+        Args:
+            name: Registered tool name.
+            maxsize: Maximum cache entries.
+        """
+        from functools import lru_cache
+
+        tool_cls = cls._tools.get(name)
+        if tool_cls and hasattr(tool_cls, "execute"):
+            tool_cls.execute = lru_cache(maxsize=maxsize)(tool_cls.execute)
+            logger.debug("[registry] Cached tool: %s (maxsize=%d)", name, maxsize)
+        else:
+            logger.warning(
+                "[registry] Cannot cache tool '%s': not found or no execute() method",
+                name,
+            )
 
     # ------------------------------------------------------------------
     # Maintenance

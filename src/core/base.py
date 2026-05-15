@@ -7,10 +7,9 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.core.hooks import LoggingHook, MetricsHook, PostRunHook, PreRunHook, TracingHook
-from src.core.state import AgentState
 from src.middleware import AgentMiddleware, build_middleware_stack
 
 logger = logging.getLogger(__name__)
@@ -93,7 +92,7 @@ class BaseAgent(ABC):
         self._pre_hooks.append(metrics_hook)
         self._post_hooks.append(metrics_hook)
 
-    async def run(self, state: AgentState) -> dict[str, Any]:
+    async def run(self, state: dict[str, Any]) -> dict[str, Any]:
         """Execute the agent with hooks. Returns a partial state update."""
         state_dict = dict(state)
 
@@ -117,7 +116,7 @@ class BaseAgent(ABC):
         return result
 
     @abstractmethod
-    async def _execute(self, state: AgentState) -> dict[str, Any]:
+    async def _execute(self, state: dict[str, Any]) -> dict[str, Any]:
         """Core agent logic. Subclasses must implement this."""
         ...
 
@@ -266,11 +265,11 @@ class BaseAgent(ABC):
 
         return {"raw_response": text}
 
-    def _build_prompt_context(self, state: AgentState) -> str:
+    def _build_prompt_context(self, state: dict[str, Any]) -> str:
         """Build context string from current state for prompt injection."""
         parts = [f"用户查询: {state.get('query', '')}"]
         if state.get("prospect_results"):
-            parts.append(f"潜客识别结果: 已完成")
+            parts.append("潜客识别结果: 已完成")
         if state.get("budget"):
             parts.append(f"可用预算: {state['budget']}")
         return "\n".join(parts)

@@ -7,11 +7,11 @@ and creative message for different user segments.
 from __future__ import annotations
 
 import logging
-from datetime import time
 from typing import Any
 
-import numpy as np
 import pandas as pd
+
+from src.tools.registry import register
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +78,7 @@ CREATIVE_TEMPLATES: dict[str, list[str]] = {
 }
 
 
+@register("reach_planner", category="conversion")
 class ReachPlanner:
     """Plan in-app reach strategy for user segments."""
 
@@ -296,13 +297,14 @@ class ReachPlanner:
         )
 
     def _select_creative(self, segment: str) -> str:
-        """Pick a creative message for the segment."""
-        import random
+        """Pick a creative message for the segment (deterministic via seeded RNG)."""
+        import numpy as np
 
+        rng = np.random.RandomState(42)
         templates = CREATIVE_TEMPLATES.get(segment, CREATIVE_TEMPLATES.get("active", []))
         if not templates:
             return "滴滴货运优惠活动进行中！"
-        return random.choice(templates)
+        return templates[rng.randint(0, len(templates))]
 
     @staticmethod
     def _format_time_window(hour: int) -> str:

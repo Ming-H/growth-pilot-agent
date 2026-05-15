@@ -14,8 +14,10 @@ import numpy as np
 import pandas as pd
 
 from src.tools.common.secure_loader import SecureDataLoader
+from src.tools.registry import register
 
 
+@register("data_loader", category="common")
 class DataLoader:
     """Load data from files or generate realistic sample data."""
 
@@ -300,12 +302,13 @@ class DataLoader:
         rng = np.random.default_rng(self.SEED)
         n_orders = n_users * 6  # Average 6 orders per user
         users = [f"U{i:05d}" for i in range(n_users)]
+        user_index = {uid: i for i, uid in enumerate(users)}
         signup_dates = pd.date_range("2024-01-01", periods=n_users, freq="h")
         rows: list[dict[str, Any]] = []
 
         for i in range(n_orders):
             uid = rng.choice(users)
-            idx = users.index(uid)
+            idx = user_index[uid]
             signup = signup_dates[idx]
             order_date = signup + pd.Timedelta(days=int(rng.exponential(15)))
             rows.append({

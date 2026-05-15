@@ -3,7 +3,6 @@
 Note: OrchestratorPrompt was removed when the old OrchestratorAgent
 was replaced by GrowthPilotAgent (Chief Agent) in the new architecture.
 """
-from src.prompts.templates.base import PromptTemplate
 from src.prompts.templates.agent_prompts import (
     AdPrompt,
     ConversionPrompt,
@@ -11,6 +10,7 @@ from src.prompts.templates.agent_prompts import (
     RetentionPrompt,
     SubsidyPrompt,
 )
+from src.prompts.templates.base import PromptTemplate
 
 __all__ = [
     "PromptTemplate",

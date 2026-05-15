@@ -28,12 +28,22 @@ try:
         ElasticityEstimator,
         SubsidyAllocator,
     )
-except ImportError:
+except ImportError as _import_err:
+    import logging as _logging
+    _logging.getLogger(__name__).warning("Tool import failed, using stubs: %s", _import_err)
 
     class _Stub:
-        """Stub for tools not yet importable."""
+        """Stub that raises RuntimeError when any method is called."""
 
-        def __init__(self, *a: Any, **kw: Any) -> None: ...
+        def __init__(self, *a: Any, **kw: Any) -> None:
+            pass
+
+        def __getattr__(self, name: str) -> Any:
+            def _stub_method(*a: Any, **kw: Any) -> Any:
+                raise RuntimeError(
+                    f"Stub tool: {name}() called but tool is not available (import failed)"
+                )
+            return _stub_method
 
     CausalInferenceEngine = ElasticityEstimator = BudgetOptimizer = SubsidyAllocator = _Stub  # type: ignore[assignment,misc]
 
@@ -70,15 +80,10 @@ class SubsidyExpert(ExpertAgentBase):
     @staticmethod
     def can_handle(query: str) -> float:
         """Return confidence score (0-1) for handling this query."""
-        keywords = [
+        return ExpertAgentBase._keyword_confidence(query, [
             "补贴", "预算", "ROI", "因果", "弹性",
             "subsidy", "budget", "causal", "elasticity",
-        ]
-        q_lower = query.lower()
-        hits = sum(1 for kw in keywords if kw.lower() in q_lower)
-        if hits == 0:
-            return 0.0
-        return min(hits / len(keywords) * 2.0, 1.0)
+        ])
 
     # ------------------------------------------------------------------
     # System prompt
@@ -153,22 +158,23 @@ class SubsidyExpert(ExpertAgentBase):
         ate_result: dict[str, Any] = {}
         causal_insight = ""
         confidence = 0.0
-        try:
-            treatment_col = "treatment" if "treatment" in data.columns else "subsidy_amount"
-            outcome_col = "converted" if "converted" in data.columns else "revenue"
-            confounders = [c for c in ["age", "city_tier", "historical_orders"]
-                           if c in data.columns]
+        treatment_col = "treatment" if "treatment" in data.columns else "subsidy_amount"
+        outcome_col = "converted" if "converted" in data.columns else "revenue"
+        confounders = [c for c in ["age", "city_tier", "historical_orders"]
+                       if c in data.columns]
 
-            ate_result = causal_engine.estimate_ate(
+        ate_raw = self._safe_execute(
+            lambda: causal_engine.estimate_ate(
                 data=data,
                 treatment=treatment_col,
                 outcome=outcome_col,
                 confounders=confounders,
                 method="backdoor",
-            )
-            if "error" in ate_result:
-                raise ValueError(ate_result["error"])
-
+            ),
+            "CausalInferenceEngine", errors, default=None,
+        )
+        if ate_raw and "error" not in ate_raw:
+            ate_result = ate_raw
             ate_val = ate_result.get("ate", 0)
             p_val = ate_result.get("p_value", 1.0)
             significant = ate_result.get("significant_at_05", False)
@@ -178,28 +184,27 @@ class SubsidyExpert(ExpertAgentBase):
                 f"95% CI=[{ate_result.get('ci_lower', 0):.4f}, {ate_result.get('ci_upper', 0):.4f}]"
             )
             confidence = 0.9 if significant else 0.6
-        except Exception as exc:
-            logger.warning("CausalInferenceEngine.estimate_ate failed, using heuristic: %s", exc)
+        else:
             ate_result = {"ate": 0.12, "ci_lower": 0.08, "ci_upper": 0.16, "method": "heuristic"}
             causal_insight = "补贴对首单转化有显著正向效果 (基于历史经验)"
             confidence = 0.85
-            errors.append(f"CausalInferenceEngine (heuristic): {exc}")
 
         # 2. Elasticity estimation
         elasticity_result: dict[str, Any] = {}
         price_sensitivity: dict[str, Any] = {}
-        try:
-            price_col = "price" if "price" in data.columns else "subsidy_amount"
-            demand_col = "demand" if "demand" in data.columns else "revenue"
+        price_col = "price" if "price" in data.columns else "subsidy_amount"
+        demand_col = "demand" if "demand" in data.columns else "revenue"
 
-            elasticity_result = elasticity_estimator.estimate_price_elasticity(
+        elasticity_raw = self._safe_execute(
+            lambda: elasticity_estimator.estimate_price_elasticity(
                 data=data,
                 price_col=price_col,
                 demand_col=demand_col,
-            )
-            if "error" in elasticity_result:
-                raise ValueError(elasticity_result["error"])
-
+            ),
+            "ElasticityEstimator", errors, default=None,
+        )
+        if elasticity_raw and "error" not in elasticity_raw:
+            elasticity_result = elasticity_raw
             elasticity_val = elasticity_result.get("elasticity", -1.0)
             elasticity_result["_summary"] = (
                 f"价格弹性={elasticity_val:.4f}, "
@@ -210,61 +215,59 @@ class SubsidyExpert(ExpertAgentBase):
                 "significant": elasticity_result.get("significant_at_05", False),
                 "interpretation": elasticity_result.get("interpretation", ""),
             }
-        except Exception as exc:
-            logger.warning("ElasticityEstimator.estimate_price_elasticity failed, using heuristic: %s", exc)
+        else:
             elasticity_result = {"elasticity": -1.8, "method": "heuristic"}
             price_sensitivity = {
                 "elasticity": -1.8,
                 "most_sensitive": "new_user",
                 "least_sensitive": "high_value",
             }
-            errors.append(f"ElasticityEstimator (heuristic): {exc}")
 
         # 3. Budget optimisation
         budget_result: dict[str, Any] = {}
         expected_roi = 0.0
         user_segments: dict[str, int] = {}
-        try:
-            raw_segments = prospect.get("segment_summary", {})
-            if raw_segments:
-                for seg_name, seg_val in raw_segments.items():
-                    if isinstance(seg_val, dict):
-                        user_segments[seg_name] = int(seg_val.get("count", 0))
-                    elif isinstance(seg_val, (int, float)):
-                        user_segments[seg_name] = int(seg_val)
-            if not user_segments:
-                if "segment" in data.columns:
-                    user_segments = data["segment"].value_counts().to_dict()
-                else:
-                    user_segments = {"new_user": 500, "active": 300, "dormant": 200}
+        raw_segments = prospect.get("segment_summary", {})
+        if raw_segments:
+            for seg_name, seg_val in raw_segments.items():
+                if isinstance(seg_val, dict):
+                    user_segments[seg_name] = int(seg_val.get("count", 0))
+                elif isinstance(seg_val, (int, float)):
+                    user_segments[seg_name] = int(seg_val)
+        if not user_segments:
+            if "segment" in data.columns:
+                user_segments = data["segment"].value_counts().to_dict()
+            else:
+                user_segments = {"new_user": 500, "active": 300, "dormant": 200}
 
-            ate_val = ate_result.get("ate", 0.12)
-            causal_effects: dict[str, dict[str, float]] = {}
-            for seg in user_segments:
-                causal_effects[seg] = {
-                    "ate": ate_val,
-                    "base_conversion_rate": 0.12,
-                    "coupon_amount_used": 10.0,
-                }
+        ate_val = ate_result.get("ate", 0.12)
+        causal_effects: dict[str, dict[str, float]] = {}
+        for seg in user_segments:
+            causal_effects[seg] = {
+                "ate": ate_val,
+                "base_conversion_rate": 0.12,
+                "coupon_amount_used": 10.0,
+            }
 
-            budget_result = budget_optimizer.optimize_allocation(
+        budget_raw = self._safe_execute(
+            lambda: budget_optimizer.optimize_allocation(
                 user_segments=user_segments,
                 causal_effects=causal_effects,
                 total_budget=float(budget),
                 min_coupon=5,
                 max_coupon=50,
                 coupon_step=5,
-            )
-            if "error" in budget_result:
-                raise ValueError(budget_result["error"])
-
+            ),
+            "BudgetOptimizer", errors, default=None,
+        )
+        if budget_raw and "error" not in budget_raw:
+            budget_result = budget_raw
             expected_roi = round(
                 budget_result.get("expected_incremental_orders", 0)
                 / max(budget_result.get("total_budget_used", 1), 1),
                 2,
             )
-        except Exception as exc:
-            logger.warning("BudgetOptimizer.optimize_allocation failed, using heuristic: %s", exc)
+        else:
             if budget > 0:
                 budget_result = {
                     "allocation": {
@@ -277,36 +280,33 @@ class SubsidyExpert(ExpertAgentBase):
                     "method": "heuristic",
                 }
                 expected_roi = 2.8
-            errors.append(f"BudgetOptimizer (heuristic): {exc}")
 
         # 4. Subsidy allocation plan
         allocation_result: dict[str, Any] = {}
-        try:
-            allocation_result = subsidy_allocator.allocate(
+        alloc_raw = self._safe_execute(
+            lambda: subsidy_allocator.allocate(
                 causal_results=ate_result,
                 elasticity_results=elasticity_result,
                 budget_plan=budget_result,
                 user_segments=user_segments,
-            )
-            if "error" in allocation_result:
-                raise ValueError(allocation_result["error"])
-        except Exception as exc:
-            logger.warning("SubsidyAllocator.allocate failed, using heuristic: %s", exc)
+            ),
+            "SubsidyAllocator", errors, default=None,
+        )
+        if alloc_raw and "error" not in alloc_raw:
+            allocation_result = alloc_raw
+        else:
             allocation_result = budget_result.get("allocation", {})
-            errors.append(f"SubsidyAllocator (heuristic): {exc}")
 
-        # Build plain dict result (no Pydantic models)
+        # Build flat dict result (matches SubsidyResult Pydantic model)
         result: dict[str, Any] = {
-            "subsidy_results": {
-                "ate": ate_result,
-                "causal_insight": causal_insight,
-                "confidence": confidence,
-                "elasticity": elasticity_result,
-                "price_sensitivity": price_sensitivity,
-                "budget_plan": budget_result,
-                "expected_roi": expected_roi,
-                "allocation_plan": allocation_result,
-            },
+            "ate": ate_result,
+            "causal_insight": causal_insight,
+            "confidence": confidence,
+            "elasticity": elasticity_result,
+            "price_sensitivity": price_sensitivity,
+            "budget_plan": budget_result,
+            "expected_roi": expected_roi,
+            "allocation_plan": allocation_result,
         }
         if errors:
             result["errors"] = errors
@@ -319,7 +319,7 @@ class SubsidyExpert(ExpertAgentBase):
     @staticmethod
     def _build_synthesis_prompt(params: dict, results: dict) -> str:
         """Build the LLM synthesis prompt from pipeline results."""
-        subsidy = results.get("subsidy_results", {})
+        subsidy = results
 
         ate = subsidy.get("ate", {})
         ate_summary = str(ate) if ate else ""

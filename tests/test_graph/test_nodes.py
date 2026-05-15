@@ -375,10 +375,14 @@ class TestApprovalNode:
     @pytest.mark.asyncio
     async def test_exact_threshold(self):
         """Budget exactly at threshold requires approval."""
-        from src.graph.nodes import approval_node, BUDGET_APPROVAL_THRESHOLD
+        from src.graph.nodes import approval_node
+        from src.core.config import get_settings
+
+        settings = get_settings()
+        threshold = settings.budget_approval_threshold
 
         state = {
-            "budget": BUDGET_APPROVAL_THRESHOLD,
+            "budget": threshold,
             "approval_required": True,
         }
         result = await approval_node(state)

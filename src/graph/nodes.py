@@ -20,19 +20,33 @@ from src.graph.state import AnalysisState, AnalysisStatus
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Expert mapping: Chinese domain keyword -> expert key used in the graph
+# Pydantic result validation
 # ---------------------------------------------------------------------------
 
-EXPERT_KEYWORD_MAP: dict[str, str] = {
-    "用户获取": "prospect",
-    "转化优化": "conversion",
-    "补贴策略": "subsidy",
-    "用户留存": "retention",
-    "广告投放": "ad",
-}
+def _validate_expert_result(expert_key: str, result: dict[str, Any]) -> dict[str, Any]:
+    """Validate expert result against its Pydantic model.
 
-QUALITY_THRESHOLD: float = 0.7
-BUDGET_APPROVAL_THRESHOLD: float = 10_000
+    Validates at the graph boundary to ensure type safety between agents.
+    On validation failure, logs a warning but does not block the pipeline.
+    """
+    from src.core.models import EXPERT_RESULT_MODELS as _RESULT_MODELS
+
+    model_cls = _RESULT_MODELS.get(expert_key)
+    if not model_cls:
+        return result
+
+    try:
+        validated = model_cls(**result)
+        validated_dict = validated.model_dump(exclude_none=True)
+        validated_dict["expert"] = expert_key
+        validated_dict["_validated"] = True
+        return validated_dict
+    except Exception as exc:
+        logger.warning("[validate] Pydantic validation failed for %s: %s", expert_key, exc)
+        return result
+
+
+# Note: QUALITY_THRESHOLD and BUDGET_APPROVAL_THRESHOLD moved to config.py
 
 PLAN_PROMPT = """\
 You are the Chief Agent of a growth analytics platform.  Given the user query
@@ -75,15 +89,36 @@ def _get_expert_cls(expert_key: str) -> type:
     return getattr(module, class_name)
 
 
+_expert_cache: dict[str, Any] = {}
+_cache_ttl: float = 300.0  # seconds
+_cache_timestamps: dict[str, float] = {}
+
+
+def _clear_expert_cache() -> None:
+    """Clear expert cache (for testing and config changes)."""
+    _expert_cache.clear()
+    _cache_timestamps.clear()
+
+
 def _create_expert(expert_key: str) -> Any:
-    """Create an expert instance with an LLM from settings."""
-    from src.core.llm_factory import create_llm
+    """Create (or retrieve cached) expert instance with TTL-based expiration."""
+    import time
+
+    now = time.monotonic()
+    cached_time = _cache_timestamps.get(expert_key, 0.0)
+    if expert_key in _expert_cache and (now - cached_time) < _cache_ttl:
+        return _expert_cache[expert_key]
+
     from src.core.config import get_settings
+    from src.core.llm_factory import create_resilient_llm
 
     settings = get_settings()
-    llm = create_llm(tier=settings.expert_model_tier)
+    llm = create_resilient_llm(tier=settings.expert_model_tier)
     cls = _get_expert_cls(expert_key)
-    return cls(llm=llm)
+    expert = cls(llm=llm)
+    _expert_cache[expert_key] = expert
+    _cache_timestamps[expert_key] = now
+    return expert
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -101,7 +136,7 @@ async def plan_node(state: AnalysisState) -> dict:  # noqa: D401
     Returns:
         dict with keys ``plan``, ``selected_experts``, ``status``.
     """
-    from src.core.llm_factory import create_llm
+    from src.core.llm_factory import create_resilient_llm
     from src.guardrails.input_guard import validate_input
 
     query = state.get("query", "")
@@ -124,7 +159,7 @@ async def plan_node(state: AnalysisState) -> dict:  # noqa: D401
     query = guard_result.sanitized_input
 
     try:
-        llm = create_llm(tier="default")
+        llm = create_resilient_llm(tier="default", agent_name="plan_node")
         prompt = PLAN_PROMPT.format(query=query, scope=scope or "full")
         response = await llm.ainvoke(prompt)
         content = response.content if hasattr(response, "content") else str(response)
@@ -140,9 +175,9 @@ async def plan_node(state: AnalysisState) -> dict:  # noqa: D401
             if e in ("prospect", "conversion", "subsidy", "retention", "ad")
         ]
 
-        # Fallback: if LLM returned no valid experts, try keyword matching
+        # Fallback: if LLM returned no valid experts, use intent classification
         if not selected_experts:
-            selected_experts = _keyword_fallback(query)
+            selected_experts = _intent_classify(query)
 
         logger.info(
             "[plan_node] Selected experts: %s (reasoning: %s)",
@@ -157,11 +192,11 @@ async def plan_node(state: AnalysisState) -> dict:  # noqa: D401
         }
 
     except Exception as exc:
-        logger.warning("[plan_node] LLM planning failed, using keyword fallback: %s", exc)
-        selected_experts = _keyword_fallback(query)
+        logger.warning("[plan_node] LLM planning failed, using intent classify: %s", exc)
+        selected_experts = _intent_classify(query)
         return {
             "plan": {
-                "reasoning": f"LLM planning failed ({exc}); keyword fallback",
+                "reasoning": f"LLM planning failed ({exc}); intent classify fallback",
                 "experts": selected_experts,
                 "context_summary": query[:100],
             },
@@ -170,14 +205,50 @@ async def plan_node(state: AnalysisState) -> dict:  # noqa: D401
         }
 
 
-def _keyword_fallback(query: str) -> list[str]:
-    """Simple keyword-based expert selection when LLM planning is unavailable."""
-    matched: list[str] = []
-    for keyword, expert_key in EXPERT_KEYWORD_MAP.items():
-        if keyword in query:
-            matched.append(expert_key)
-    # Default to all experts if nothing matched
-    return matched or ["prospect", "conversion", "subsidy", "retention", "ad"]
+def _intent_classify(query: str) -> list[str]:
+    """Score each expert's confidence for the query using can_handle().
+
+    Uses each ExpertAgentBase subclass's domain-specific keyword matching
+    instead of a centralized keyword map. Falls back to all experts if
+    none score above the threshold.
+    """
+    from src.agents.ad import AdExpert
+    from src.agents.conversion import ConversionExpert
+    from src.agents.prospect import ProspectExpert
+    from src.agents.retention import RetentionExpert
+    from src.agents.subsidy import SubsidyExpert
+
+    experts = [
+        ("prospect", ProspectExpert),
+        ("conversion", ConversionExpert),
+        ("subsidy", SubsidyExpert),
+        ("retention", RetentionExpert),
+        ("ad", AdExpert),
+    ]
+
+    scores = []
+    for key, cls in experts:
+        try:
+            # Create a temporary instance to call can_handle
+            score = cls.can_handle(query)
+            scores.append((key, score))
+        except Exception:
+            # If can_handle fails, give neutral score
+            scores.append((key, 0.3))
+
+    # Select experts scoring >= 0.5
+    selected = [name for name, score in scores if score >= 0.5]
+
+    # Default to all if none qualify
+    if not selected:
+        selected = [name for name, _ in experts]
+
+    logger.info(
+        "[_intent_classify] Scores: %s -> Selected: %s",
+        {k: round(s, 2) for k, s in scores},
+        selected,
+    )
+    return selected
 
 
 async def execute_node(state: AnalysisState) -> dict:  # noqa: D401
@@ -204,13 +275,16 @@ async def execute_node(state: AnalysisState) -> dict:  # noqa: D401
         }
 
     async def _run_expert(expert_key: str) -> tuple[str, dict[str, Any]]:
+        from src.core.config import get_settings
         expert = _create_expert(expert_key)
         params = {
             "query": query,
             "scope": scope,
             "budget": budget,
         }
-        result = await expert.analyze(params)
+        timeout = get_settings().expert_timeout_seconds
+        async with asyncio.timeout(timeout):
+            result = await expert.analyze(params)
         return expert_key, result
 
     # Run all experts in parallel
@@ -233,6 +307,10 @@ async def execute_node(state: AnalysisState) -> dict:  # noqa: D401
         else:
             _, result = outcome  # type: ignore[misc]
             result["expert"] = expert_key
+
+            # Pydantic validation at node boundary
+            result = _validate_expert_result(expert_key, result)
+
             expert_results.append(result)
 
     return {
@@ -274,8 +352,11 @@ async def evaluate_node(state: AnalysisState) -> dict:  # noqa: D401
     quality_scores = await batch_evaluate(expert_results_dict, query)
 
     # Determine if any expert scored below threshold
+    from src.core.config import get_settings
+
+    settings = get_settings()
     needs_refinement = any(
-        score.overall < QUALITY_THRESHOLD
+        score.overall < settings.quality_threshold
         for score in quality_scores.values()
     )
 
@@ -316,10 +397,13 @@ async def refine_node(state: AnalysisState) -> dict:  # noqa: D401
     scope = state.get("scope") or ""
     budget = state.get("budget") or 0
 
+    from src.core.config import get_settings
+
+    settings = get_settings()
     # Find experts that need refinement
     experts_to_refine = [
         name for name, score_data in quality_scores.items()
-        if score_data.get("overall", 1.0) < QUALITY_THRESHOLD
+        if score_data.get("overall", 1.0) < settings.quality_threshold
     ]
 
     if not experts_to_refine:
@@ -393,6 +477,10 @@ async def approval_node(state: AnalysisState) -> dict:  # noqa: D401
     budget = state.get("budget") or 0
     approval_required = state.get("approval_required", False)
 
+    from src.core.config import get_settings
+
+    settings = get_settings()
+
     if not approval_required:
         # Auto-approve when approval is not required
         return {
@@ -401,11 +489,11 @@ async def approval_node(state: AnalysisState) -> dict:  # noqa: D401
         }
 
     # Budget-based auto-approval
-    if budget < BUDGET_APPROVAL_THRESHOLD:
+    if budget < settings.budget_approval_threshold:
         logger.info(
             "[approval_node] Auto-approved (budget=%.2f < threshold=%.2f)",
             budget,
-            BUDGET_APPROVAL_THRESHOLD,
+            settings.budget_approval_threshold,
         )
         return {
             "approved": True,
@@ -416,7 +504,7 @@ async def approval_node(state: AnalysisState) -> dict:  # noqa: D401
     logger.info(
         "[approval_node] Awaiting human approval (budget=%.2f >= threshold=%.2f)",
         budget,
-        BUDGET_APPROVAL_THRESHOLD,
+        settings.budget_approval_threshold,
     )
     return {
         "approved": None,
@@ -435,7 +523,7 @@ async def report_node(state: AnalysisState) -> dict:  # noqa: D401
         dict with keys ``final_report``, ``token_usage``, ``cost_usd``,
         ``status``.
     """
-    from src.core.llm_factory import create_llm
+    from src.core.llm_factory import create_resilient_llm
 
     query = state.get("query", "")
     expert_results_list: list[dict[str, Any]] = state.get("expert_results", [])
@@ -489,21 +577,18 @@ Be concise but specific. Use data and metrics from the expert results.
 """
 
     try:
-        llm = create_llm(tier="default")
+        llm = create_resilient_llm(tier="default", agent_name="report_node")
         response = await llm.ainvoke(report_prompt)
         final_report = response.content if hasattr(response, "content") else str(response)
 
-        # Estimate token usage (rough approximation)
-        input_tokens = len(report_prompt) // 4
-        output_tokens = len(final_report) // 4
+        from src.core.token_tracker import get_cost_tracker
+        cost_report = get_cost_tracker().report()
         token_usage = {
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "total_tokens": input_tokens + output_tokens,
+            "input_tokens": cost_report["total_tokens"],
+            "output_tokens": 0,
+            "total_tokens": cost_report["total_tokens"],
         }
-
-        # Rough cost estimate (glm-4.7 pricing approximation)
-        cost_usd = (input_tokens * 0.000001 + output_tokens * 0.000002)
+        cost_usd = cost_report["total_cost_usd"]
 
     except Exception as exc:
         logger.warning("[report_node] LLM report generation failed: %s", exc)

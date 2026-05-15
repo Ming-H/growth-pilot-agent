@@ -6,9 +6,9 @@ health checks, and analysis persistence with multi-tenant org isolation.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
-import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
@@ -72,20 +72,19 @@ logger = logging.getLogger(__name__)
 # Globals (initialized in lifespan)
 # ---------------------------------------------------------------------------
 
-_memory_manager: MemoryManager | None = None
+_memory_cache: dict[str, MemoryManager] = {}
 
 # Cached compiled graph for human-in-the-loop endpoints.
 # Built lazily on first access so that the import-time cost is deferred.
 _compiled_graph: Any | None = None
 
 
-def _get_memory() -> MemoryManager:
-    """Return the singleton MemoryManager instance."""
-    global _memory_manager
-    if _memory_manager is None:
+def _get_memory(org_id: str) -> MemoryManager:
+    """Return a per-org MemoryManager instance (cached)."""
+    if org_id not in _memory_cache:
         settings = get_settings()
-        _memory_manager = MemoryManager(base_path=settings.memory_base_path)
-    return _memory_manager
+        _memory_cache[org_id] = MemoryManager(base_path=settings.memory_base_path, org_id=org_id)
+    return _memory_cache[org_id]
 
 
 async def _get_graph() -> Any:
@@ -113,6 +112,20 @@ async def _get_graph() -> Any:
 async def lifespan(app: FastAPI):  # noqa: ARG001
     """Application lifespan: startup and shutdown hooks."""
     settings = get_settings()
+
+    # Security: validate production config
+    if not settings.demo_mode:
+        if settings.jwt_secret == "change-me-in-production":
+            raise ValueError(
+                "FATAL: Default JWT secret detected in non-demo mode. "
+                "Set GPA_JWT_SECRET to a secure random string."
+            )
+        if not settings.llm_api_key:
+            raise ValueError(
+                "FATAL: No LLM API key configured. "
+                "Set GPA_LLM_API_KEY or enable GPA_DEMO_MODE=true."
+            )
+
     logging.basicConfig(
         level=getattr(logging, settings.log_level, logging.INFO),
         format="%(asctime)s %(levelname)-8s %(name)s  %(message)s",
@@ -337,6 +350,11 @@ async def analyze(
 
     Requires authentication. Analysis is scoped to the user's org.
     """
+    # Enforce monthly quota
+    org = await db.get(Organization, user.org_id)
+    if org and org.monthly_quota > 0 and org.usage_count >= org.monthly_quota:
+        raise HTTPException(status_code=429, detail="Monthly analysis quota exceeded")
+
     # Create Analysis record in running state
     analysis = Analysis(
         user_id=user.id,
@@ -385,10 +403,10 @@ async def analyze(
 
     # Also store in memory for backward compatibility
     try:
-        memory = _get_memory()
+        memory = _get_memory(user.org_id)
         scope = state.get("scope", "full")
         summary = state.get("analysis_summary", "")
-        memory.store(
+        await memory.astore(
             run_id=analysis.id,
             query=request.query,
             scope=scope,
@@ -397,11 +415,17 @@ async def analyze(
     except Exception as exc:
         logger.warning("Failed to store analysis in memory: %s", exc)
 
+    # Increment usage count after successful analysis
+    if org:
+        org.usage_count += 1
+
     return _analysis_to_response(analysis)
 
 
 @router.post("/analyze/stream")
+@limiter.limit("10/minute")
 async def analyze_stream(
+    http_request: Request,
     request: AnalyzeRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -413,6 +437,11 @@ async def analyze_stream(
     emits legacy ``message`` / ``result`` / ``error`` events for backward
     compatibility with older consumers.
     """
+    # Enforce monthly quota
+    org = await db.get(Organization, user.org_id)
+    if org and org.monthly_quota > 0 and org.usage_count >= org.monthly_quota:
+        raise HTTPException(status_code=429, detail="Monthly analysis quota exceeded")
+
     # Create Analysis record in running state
     analysis = Analysis(
         user_id=user.id,
@@ -441,8 +470,17 @@ async def analyze_stream(
         }
 
     async def event_generator():
-        """Generate SSE events from the workflow execution."""
-        # ── Plan stage ──────────────────────────────────────────────────
+        """Generate SSE events from real graph streaming via astrevents.
+
+        Uses ``compiled_graph.astream_events(version="v2")`` to emit
+        granular progress events as each graph node starts/completes, while
+        preserving the existing structured ``agent_event`` SSE format and
+        legacy ``message`` / ``result`` / ``error`` event compatibility.
+        """
+        from src.graph.graph import build_compiled_graph
+        from src.graph.state import AnalysisStatus
+
+        # ── Initial plan event ──────────────────────────────────────────
         plan_event = AgentEvent(
             type="plan",
             message="Analyzing your request...",
@@ -460,76 +498,96 @@ async def analyze_stream(
             ).model_dump_json(),
         }
 
+        # ── Progress map for node events ────────────────────────────────
+        _node_progress = {
+            "plan_node": 0.1,
+            "execute_node": 0.3,
+            "evaluate_node": 0.6,
+            "report_node": 0.85,
+        }
+        _node_type = {
+            "plan_node": "plan",
+            "execute_node": "execute",
+            "evaluate_node": "evaluate",
+            "report_node": "report",
+        }
+
         start_time = time.monotonic()
+        compiled_graph = await build_compiled_graph()
+        initial_state = {
+            "query": request.query,
+            "scope": request.scope,
+            "budget": request.budget,
+            "org_id": user.org_id,
+            "user_id": user.id,
+            "expert_results": [],
+            "execution_errors": [],
+            "approval_required": False,
+            "status": AnalysisStatus.PENDING,
+        }
+        config = {"configurable": {"thread_id": f"{user.org_id}:{analysis_id}"}}
+        settings = get_settings()
+
         try:
-            state = await _run_analysis(request)
-            elapsed = time.monotonic() - start_time
-
-            # ── Execute stage — emit per-expert events ─────────────────
-            selected_experts = list(state.get("agents_run", []))
-            if not selected_experts:
-                # Derive from result keys
-                for key in (
-                    "prospect_results",
-                    "conversion_results",
-                    "subsidy_results",
-                    "retention_results",
-                    "ad_results",
+            async with asyncio.timeout(settings.sse_timeout_seconds):
+                async for event in compiled_graph.astream_events(
+                    initial_state, config=config, version="v2"
                 ):
-                    if state.get(key) is not None:
-                        selected_experts.append(key.replace("_results", ""))
+                    kind = event["event"]
+                    name = event.get("name", "")
 
-            expert_count = max(len(selected_experts), 1)
-            for idx, expert_name in enumerate(selected_experts):
-                progress = 0.2 + (0.4 * (idx / expert_count))
-                exec_event = AgentEvent(
-                    type="execute",
-                    expert=expert_name,
-                    message=f"Running {expert_name} analysis...",
-                    progress=round(progress, 2),
-                    data={"expert": expert_name, "index": idx, "total": expert_count},
-                )
-                yield _sse_event(exec_event)
+                    if kind == "on_chain_start" and name in _node_progress:
+                        progress = _node_progress[name]
+                        evt_type = _node_type[name]
+                        yield _sse_event(AgentEvent(
+                            type=evt_type,
+                            message=f"Starting {name}...",
+                            progress=progress,
+                            data={"node": name, "phase": "start"},
+                        ))
+                    elif kind == "on_chain_end" and name in _node_progress:
+                        progress = _node_progress[name] + 0.15
+                        evt_type = _node_type[name]
+                        output = event.get("data", {}).get("output", {})
+                        yield _sse_event(AgentEvent(
+                            type=evt_type,
+                            message=f"Completed {name}",
+                            progress=round(min(progress, 0.95), 2),
+                            data={"node": name, "phase": "end"},
+                        ))
+                        # After execute_node, emit per-expert events from state
+                        if name == "execute_node" and isinstance(output, dict):
+                            selected_experts = output.get("selected_experts", [])
+                            expert_count = max(len(selected_experts), 1)
+                            for idx, expert_name in enumerate(selected_experts):
+                                ep = 0.3 + (0.25 * ((idx + 1) / expert_count))
+                                yield _sse_event(AgentEvent(
+                                    type="execute",
+                                    expert=expert_name,
+                                    message=f"Ran {expert_name} analysis",
+                                    progress=round(ep, 2),
+                                    data={
+                                        "expert": expert_name,
+                                        "index": idx,
+                                        "total": expert_count,
+                                    },
+                                ))
 
-            # Stream intermediate events from state (if provided by workflow)
-            for evt in state.get("events", []):
-                progress_event = AgentEvent(
-                    type="progress",
-                    expert=evt.get("agent"),
-                    message=evt.get("message", ""),
-                    progress=0.6,
-                    data=evt,
-                )
-                yield _sse_event(progress_event)
-
-            # ── Evaluate stage ──────────────────────────────────────────
-            eval_event = AgentEvent(
-                type="evaluate",
-                message="Evaluating quality...",
-                progress=0.7,
-                data={"quality_scores": state.get("quality_scores", {})},
-            )
-            yield _sse_event(eval_event)
+            elapsed = time.monotonic() - start_time
 
             # ── Approval stage ──────────────────────────────────────────
             approval_event = AgentEvent(
                 type="approval",
                 message="Waiting for approval...",
                 progress=0.8,
-                data={"approved": state.get("approved", True)},
+                data={"approved": True},
             )
             yield _sse_event(approval_event)
 
-            # ── Report stage ────────────────────────────────────────────
-            report_event = AgentEvent(
-                type="report",
-                message="Generating report...",
-                progress=0.9,
-                data={},
-            )
-            yield _sse_event(report_event)
+            # ── Complete stage — fetch final state ──────────────────────
+            state_snapshot = await compiled_graph.aget_state(config)
+            state = dict(state_snapshot.values) if state_snapshot and state_snapshot.values else {}
 
-            # ── Complete stage — final result ───────────────────────────
             response = _build_analysis_response(state, analysis_id, request)
             complete_event = AgentEvent(
                 type="complete",
@@ -567,10 +625,10 @@ async def analyze_stream(
 
             # Store in memory for backward compatibility
             try:
-                memory = _get_memory()
+                memory = _get_memory(user.org_id)
                 scope = state.get("scope", "full")
                 summary = state.get("analysis_summary", "")
-                memory.store(
+                await memory.astore(
                     run_id=analysis_id,
                     query=request.query,
                     scope=scope,
@@ -578,6 +636,10 @@ async def analyze_stream(
                 )
             except Exception as exc:
                 logger.warning("Memory store failed in stream: %s", exc)
+
+            # Increment usage count after successful stream analysis
+            if org:
+                org.usage_count += 1
 
         except Exception as exc:
             elapsed = time.monotonic() - start_time
@@ -847,14 +909,17 @@ async def health_check() -> HealthResponse:
 
 
 # ---------------------------------------------------------------------------
-# Memory endpoints (no auth, backward compatible)
+# Memory endpoints (require auth)
 # ---------------------------------------------------------------------------
 
 
 @router.get("/memory", response_model=MemoryResponse)
-async def get_memory(limit: int = 20) -> MemoryResponse:
-    """Retrieve recent memory entries."""
-    memory = _get_memory()
+async def get_memory(
+    limit: int = 20,
+    current_user: User = Depends(get_current_user),
+) -> MemoryResponse:
+    """Retrieve recent memory entries, scoped to the user's org."""
+    memory = _get_memory(current_user.org_id)
     entries = memory.get_recent(limit=limit)
     memories = [
         MemoryEntryResponse(
@@ -867,17 +932,19 @@ async def get_memory(limit: int = 20) -> MemoryResponse:
         )
         for entry in entries
     ]
-    return MemoryResponse(memories=memories, total=memory.count())
+    return MemoryResponse(memories=memories, total=len(entries))
 
 
 @router.delete("/memory", response_model=MemoryClearResponse)
-async def clear_memory() -> MemoryClearResponse:
-    """Clear all memory entries."""
-    memory = _get_memory()
+async def clear_memory(
+    current_user: User = Depends(get_current_user),
+) -> MemoryClearResponse:
+    """Clear memory entries for the user's org."""
+    memory = _get_memory(current_user.org_id)
     count = memory.clear()
     return MemoryClearResponse(
         removed_count=count,
-        message=f"Cleared {count} memory entries",
+        message=f"Cleared {count} memory entries for org {current_user.org_id}",
     )
 
 
@@ -896,9 +963,10 @@ def create_app() -> FastAPI:
     )
 
     # CORS
+    settings = get_settings()
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=settings.cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -947,12 +1015,14 @@ def create_app() -> FastAPI:
     ) -> JSONResponse:
         """Catch-all handler for unhandled exceptions."""
         logger.exception("Unhandled exception: %s", exc)
+        settings = get_settings()
+        detail = str(exc) if settings.demo_mode else "Internal server error"
         return JSONResponse(
             status_code=500,
             content={
                 "success": False,
                 "error": "Internal server error",
-                "detail": str(exc),
+                "detail": detail,
             },
         )
 

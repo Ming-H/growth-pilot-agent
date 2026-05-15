@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any
 
 from src.evals.evaluator import EvalResult
 
@@ -148,16 +147,16 @@ class EvalReport:
         lines = [
             "## 总体摘要",
             "",
-            f"| 指标 | 分数 | 等级 |",
-            f"|------|------|------|",
+            "| 指标 | 分数 | 等级 |",
+            "|------|------|------|",
             f"| **总体平均分** | {avg_score:.2f} | {self._grade(avg_score)} |",
             f"| 最低分 | {min_score:.2f} | {self._grade(min_score)} |",
             f"| 最高分 | {max_score:.2f} | {self._grade(max_score)} |",
             "",
             "### 各维度平均分",
             "",
-            f"| 维度 | 平均分 | 等级 |",
-            f"|------|--------|------|",
+            "| 维度 | 平均分 | 等级 |",
+            "|------|--------|------|",
         ]
         for dim in dims:
             avg = dim_avgs.get(dim, 0.0)

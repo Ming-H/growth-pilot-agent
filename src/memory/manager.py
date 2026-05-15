@@ -26,38 +26,25 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Default org_id used when callers do not supply one (backward compat).
-_DEFAULT_ORG_ID = "default"
-
 # ---------------------------------------------------------------------------
 # Chinese + English tokenization helper (used by TF-IDF fallback)
 # ---------------------------------------------------------------------------
 
-# Match individual Chinese characters or runs of alphanumeric words
 _ZH_CHAR = re.compile(r"[\u4e00-\u9fff]")
 _WORD_RE = re.compile(r"[a-zA-Z0-9]+")
-_ZH_SEGMENT_RE = re.compile(r"[\u4e00-\u9fff]")
 
 
 def _tokenize(text: str) -> list[str]:
-    """Simple tokenizer: split Chinese into unigrams + English/numbers into words.
-
-    Returns lowercase tokens suitable for TF-IDF matching.
-    """
-    if not text:
-        return []
-
+    """Tokenize text for TF-IDF. Uses jieba for Chinese if available."""
     tokens: list[str] = []
-
-    # Extract Chinese unigrams
-    for ch in text:
-        if _ZH_CHAR.match(ch):
-            tokens.append(ch)
-
-    # Extract English/number words
-    for word in _WORD_RE.findall(text):
-        tokens.append(word.lower())
-
+    try:
+        import jieba
+        zh_chars = _ZH_CHAR.findall(text)
+        if zh_chars:
+            tokens.extend(jieba.cut("".join(zh_chars)))
+    except ImportError:
+        tokens.extend(_ZH_CHAR.findall(text))
+    tokens.extend(w.lower() for w in _WORD_RE.findall(text))
     return tokens
 
 
@@ -172,11 +159,10 @@ class MemoryManager:
 
     _STORE_FILENAME = "memory_store.json"
 
-    def __init__(self, base_path: str = "./data/memory", org_id: str | None = None) -> None:
+    def __init__(self, base_path: str = "./data/memory", *, org_id: str) -> None:
+        self._org_id = org_id
         self.base_path = Path(base_path).resolve()
-        self.base_path.mkdir(parents=True, exist_ok=True)
-        self._store_path = self.base_path / self._STORE_FILENAME
-        self._org_id = org_id or _DEFAULT_ORG_ID
+        self._store_path = self.base_path / self._org_id / self._STORE_FILENAME
 
         # Attempt to initialise the vector store backend
         self._vector_store = None
@@ -232,6 +218,7 @@ class MemoryManager:
     def _save(self) -> None:
         """Persist memory entries to JSON file."""
         try:
+            self._store_path.parent.mkdir(parents=True, exist_ok=True)
             self._store_path.write_text(
                 json.dumps(self._entries, ensure_ascii=False, indent=2),
                 encoding="utf-8",
@@ -294,7 +281,7 @@ class MemoryManager:
                 )
                 # Run the async store in a synchronous context
                 try:
-                    loop = asyncio.get_running_loop()
+                    asyncio.get_running_loop()  # raises RuntimeError if no loop
                     # We're inside an existing event loop – schedule it
                     import concurrent.futures
 
@@ -356,7 +343,7 @@ class MemoryManager:
                 import asyncio
 
                 try:
-                    loop = asyncio.get_running_loop()
+                    asyncio.get_running_loop()  # raises RuntimeError if no loop
                     import concurrent.futures
 
                     with concurrent.futures.ThreadPoolExecutor() as pool:
@@ -595,6 +582,34 @@ class MemoryManager:
     def count(self) -> int:
         """Return the total number of stored memory entries."""
         return len(self._entries)
+
+    # ------------------------------------------------------------------
+    # Async public API
+    # ------------------------------------------------------------------
+
+    async def astore(
+        self,
+        run_id: str,
+        query: str,
+        scope: str,
+        results_summary: str = "",
+        **kwargs: Any,
+    ) -> str:
+        """Async version of store()."""
+        return self.store(
+            run_id=run_id,
+            query=query,
+            scope=scope,
+            results_summary=results_summary,
+        )
+
+    async def asearch(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
+        """Async version of search()."""
+        return self.search(query=query, limit=limit)
+
+    async def aclear(self) -> int:
+        """Async version of clear()."""
+        return self.clear()
 
     @property
     def uses_vector_store(self) -> bool:

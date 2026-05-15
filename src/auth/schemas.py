@@ -1,12 +1,12 @@
 """Pydantic schemas for auth endpoints."""
 from __future__ import annotations
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, Field
 
 
 class RegisterRequest(BaseModel):
     email: str
-    password: str
+    password: str = Field(min_length=8)
     name: str = ""
     org_name: str = ""
 

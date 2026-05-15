@@ -10,24 +10,23 @@ and human approval checkpoints.
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal
+from typing import Any
 
 from langgraph.graph import END, StateGraph
 
-from src.graph.state import AnalysisState, AnalysisStatus
 from src.graph.nodes import (
-    plan_node,
-    execute_node,
-    evaluate_node,
-    refine_node,
     approval_node,
+    evaluate_node,
+    execute_node,
+    plan_node,
+    refine_node,
     report_node,
 )
+from src.graph.state import AnalysisState, AnalysisStatus
 
 logger = logging.getLogger(__name__)
 
-# Maximum refinement rounds before forcing progression
-MAX_REFINEMENT_ROUNDS: int = 2
+# Note: max_refinement_rounds is configured in src.core.config.Settings
 
 
 # ---------------------------------------------------------------------------
@@ -46,12 +45,15 @@ def _route_after_evaluate(state: AnalysisState) -> str:
     refinement_round = state.get("refinement_round", 0) or 0
     approval_required = state.get("approval_required", False)
 
-    if needs_refinement and refinement_round < MAX_REFINEMENT_ROUNDS:
+    from src.core.config import get_settings
+
+    settings = get_settings()
+    if needs_refinement and refinement_round < settings.max_refinement_rounds:
         logger.info(
-            "[router] Routing to execute for refinement round %d",
+            "[router] Routing to refine for refinement round %d",
             refinement_round,
         )
-        return "execute"
+        return "refine"
 
     if approval_required:
         logger.info("[router] Routing to approval checkpoint")
@@ -59,6 +61,20 @@ def _route_after_evaluate(state: AnalysisState) -> str:
 
     logger.info("[router] Routing to report generation")
     return "report"
+
+
+def _route_after_plan(state: AnalysisState) -> str:
+    """Route after planning: execute if experts selected, else end.
+
+    If the plan node selected experts for execution, route to the execute
+    node.  If no experts were selected (e.g. the query was out of scope or
+    the plan decided no analysis is needed), route directly to END.
+    """
+    selected = state.get("selected_experts", [])
+    if selected:
+        return "execute"
+    logger.info("[router] No experts selected, routing to END")
+    return END
 
 
 def _route_after_approval(state: AnalysisState) -> str:
@@ -110,7 +126,15 @@ def build_graph() -> StateGraph:
     graph.set_entry_point("plan")
 
     # Static edges
-    graph.add_edge("plan", "execute")
+    # Conditional edge after plan: execute only if experts were selected
+    graph.add_conditional_edges(
+        "plan",
+        _route_after_plan,
+        {
+            "execute": "execute",
+            END: END,  # no experts selected, skip to end
+        },
+    )
 
     # After execute, always go to evaluate
     graph.add_edge("execute", "evaluate")
@@ -120,11 +144,14 @@ def build_graph() -> StateGraph:
         "evaluate",
         _route_after_evaluate,
         {
-            "execute": "execute",   # re-run with refined set
+            "refine": "refine",     # re-run only experts below quality threshold
             "approval": "approval",
             "report": "report",
         },
     )
+
+    # After refine, always re-evaluate
+    graph.add_edge("refine", "evaluate")
 
     # Conditional edge after approval
     graph.add_conditional_edges(
@@ -205,6 +232,9 @@ async def run_analysis(
     """
     compiled_graph = await build_compiled_graph()
 
+    from src.core.observability import trace_id_var
+    trace_id_var.set(f"{org_id}:{thread_id}")
+
     initial_state: AnalysisState = {
         "query": query,
         "org_id": org_id,
@@ -217,6 +247,6 @@ async def run_analysis(
         "status": AnalysisStatus.PENDING,
     }
 
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {"configurable": {"thread_id": f"{org_id}:{thread_id}"}}
     result = await compiled_graph.ainvoke(initial_state, config=config)
     return result

@@ -24,6 +24,7 @@ class QualityScore(BaseModel):
     data_grounding: float = Field(ge=0, le=1, description="Are claims backed by data/metrics?")
     overall: float = Field(ge=0, le=1, description="Weighted composite score")
     reasoning: str = Field(default="", description="Feedback for improvement if score is low")
+    evaluation_failed: bool = Field(default=False, description="Whether the evaluation itself failed")
 
 
 EVAL_PROMPT = """You are a quality evaluator for growth analysis outputs.
@@ -70,13 +71,14 @@ async def evaluate_expert_output(
         data = json.loads(text)
         return QualityScore(**data)
     except Exception as e:
-        logger.warning(f"Evaluation failed for {expert_name}: {e}")
+        logger.warning("Evaluation failed for %s: %s", expert_name, e)
         return QualityScore(
-            completeness=0.7,
-            actionability=0.7,
-            data_grounding=0.7,
-            overall=0.7,
+            completeness=0.5,
+            actionability=0.5,
+            data_grounding=0.5,
+            overall=0.5,
             reasoning=f"Evaluation failed: {e}",
+            evaluation_failed=True,
         )
 
 
@@ -99,13 +101,14 @@ async def batch_evaluate(
     scores = await asyncio.gather(*coros, return_exceptions=True)
     for name, score in zip(names, scores):
         if isinstance(score, Exception):
-            logger.warning(f"Evaluation error for {name}: {score}")
+            logger.warning("Evaluation error for %s: %s", name, score)
             results[name] = QualityScore(
-                completeness=0.7,
-                actionability=0.7,
-                data_grounding=0.7,
-                overall=0.7,
+                completeness=0.5,
+                actionability=0.5,
+                data_grounding=0.5,
+                overall=0.5,
                 reasoning=f"Error: {score}",
+                evaluation_failed=True,
             )
         else:
             results[name] = score

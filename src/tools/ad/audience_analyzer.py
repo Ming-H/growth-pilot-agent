@@ -155,26 +155,35 @@ class AudienceAnalyzer:
         # Collect seed user IDs for exclusion
         seed_ids = {str(u.get("user_id", "")) for u in seed_users}
 
-        # Compute cosine similarity for each candidate
-        similarities: list[tuple[str, float]] = []
+        # Build candidate matrix (excluding seed users) and keep aligned uid list
+        candidates: list[tuple[str, np.ndarray]] = []
         for u in all_users:
             uid = str(u.get("user_id", ""))
             if uid in seed_ids:
                 continue
-
             vec = self._user_to_vector(u, feature_keys)
-            vec_norm = norm(vec)
-            if vec_norm == 0:
-                continue
+            if np.any(vec != 0):
+                candidates.append((uid, vec))
 
-            cos_sim = float(np.dot(centroid_normalized, vec / vec_norm))
-            similarities.append((uid, cos_sim))
+        if not candidates:
+            return []
+
+        # Vectorized cosine similarity
+        candidate_uids = [uid for uid, _ in candidates]
+        candidate_matrix = np.array([vec for _, vec in candidates])  # (N, D)
+
+        # Normalize rows
+        row_norms = norm(candidate_matrix, axis=1, keepdims=True)
+        row_norms[row_norms == 0] = 1.0
+        candidate_normalized = candidate_matrix / row_norms
+
+        # Cosine similarity = dot(candidate_normalized, centroid_normalized)
+        similarities = candidate_normalized @ centroid_normalized  # (N,)
 
         # Sort by similarity descending
-        similarities.sort(key=lambda x: x[1], reverse=True)
+        top_indices = np.argsort(similarities)[::-1][:top_k]
 
-        # Return top_k user IDs
-        return [uid for uid, _ in similarities[:top_k]]
+        return [candidate_uids[i] for i in top_indices]
 
     # ------------------------------------------------------------------
     # Private helpers

@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.core import __version__
-from src.core.state import AgentState
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +14,15 @@ logger = logging.getLogger(__name__)
 class ReportGenerator:
     """Generates a full markdown report from the workflow state."""
 
-    def generate_report(self, state: AgentState) -> str:
+    @staticmethod
+    def _get_expert_result(state: dict[str, Any], expert_name: str) -> dict[str, Any]:
+        """Get a specific expert's result from the new state format."""
+        for r in state.get("expert_results", []):
+            if r.get("expert") == expert_name:
+                return r
+        return state.get(f"{expert_name}_results", {})  # fallback to old format
+
+    def generate_report(self, state: dict[str, Any]) -> str:
         """Generate a full markdown report.
 
         Parameters
@@ -49,7 +56,7 @@ class ReportGenerator:
     # Section builders
     # ------------------------------------------------------------------
 
-    def _header(self, state: AgentState) -> str:
+    def _header(self, state: dict[str, Any]) -> str:
         query = state.get("query", "N/A")
         scope = state.get("scope", "full")
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -62,7 +69,7 @@ class ReportGenerator:
             f"- **预算**: {state.get('budget', 'N/A')}"
         )
 
-    def _kpi_section(self, state: AgentState) -> str:
+    def _kpi_section(self, state: dict[str, Any]) -> str:
         kpi = state.get("kpi_snapshot") or {}
         if not kpi:
             return ""
@@ -80,8 +87,8 @@ class ReportGenerator:
         ]
         return "\n".join(lines)
 
-    def _prospect_section(self, state: AgentState) -> str:
-        data = state.get("prospect_results") or {}
+    def _prospect_section(self, state: dict[str, Any]) -> str:
+        data = self._get_expert_result(state, "prospect") or {}
         if not data:
             return ""
         lines = ["## 潜客识别分析\n"]
@@ -114,8 +121,8 @@ class ReportGenerator:
 
         return "\n".join(lines)
 
-    def _conversion_section(self, state: AgentState) -> str:
-        data = state.get("conversion_results") or {}
+    def _conversion_section(self, state: dict[str, Any]) -> str:
+        data = self._get_expert_result(state, "conversion") or {}
         if not data:
             return ""
         lines = ["## 转化策略分析\n"]
@@ -156,8 +163,8 @@ class ReportGenerator:
 
         return "\n".join(lines)
 
-    def _subsidy_section(self, state: AgentState) -> str:
-        data = state.get("subsidy_results") or {}
+    def _subsidy_section(self, state: dict[str, Any]) -> str:
+        data = self._get_expert_result(state, "subsidy") or {}
         if not data:
             return ""
         lines = ["## 补贴策略分析\n"]
@@ -176,14 +183,14 @@ class ReportGenerator:
         # ATE info
         ate = data.get("ate", {})
         if ate:
-            lines.append(f"### 因果推断结果\n")
+            lines.append("### 因果推断结果\n")
             lines.append(f"- 平均处理效应 (ATE): {ate}")
             lines.append(f"- 置信度: {self._pct(data.get('confidence', 0))}")
 
         return "\n".join(lines)
 
-    def _retention_section(self, state: AgentState) -> str:
-        data = state.get("retention_results") or {}
+    def _retention_section(self, state: dict[str, Any]) -> str:
+        data = self._get_expert_result(state, "retention") or {}
         if not data:
             return ""
         lines = ["## 用户留存分析\n"]
@@ -201,7 +208,7 @@ class ReportGenerator:
 
         high_risk = data.get("high_risk_users", [])
         if high_risk:
-            lines.append(f"### 高流失风险用户\n")
+            lines.append("### 高流失风险用户\n")
             lines.append(f"- 高风险用户数: {len(high_risk)}")
             churn_factors = data.get("churn_factors", [])
             if churn_factors:
@@ -209,8 +216,8 @@ class ReportGenerator:
 
         return "\n".join(lines)
 
-    def _ad_section(self, state: AgentState) -> str:
-        data = state.get("ad_results") or {}
+    def _ad_section(self, state: dict[str, Any]) -> str:
+        data = self._get_expert_result(state, "ad") or {}
         if not data:
             return ""
         lines = ["## 广告投放分析\n"]
@@ -240,7 +247,7 @@ class ReportGenerator:
 
         return "\n".join(lines)
 
-    def _experiment_section(self, state: AgentState) -> str:
+    def _experiment_section(self, state: dict[str, Any]) -> str:
         data = state.get("experiment_results") or {}
         if not data:
             return ""
@@ -252,7 +259,7 @@ class ReportGenerator:
                 lines.append(f"- **{key}**: {value}")
         return "\n".join(lines)
 
-    def _seasonal_section(self, state: AgentState) -> str:
+    def _seasonal_section(self, state: dict[str, Any]) -> str:
         data = state.get("seasonal_context") or {}
         if not data:
             return ""
@@ -265,7 +272,7 @@ class ReportGenerator:
             lines.append(f"**建议**: {data['recommendation']}\n")
         return "\n".join(lines)
 
-    def _strategy_section(self, state: AgentState) -> str:
+    def _strategy_section(self, state: dict[str, Any]) -> str:
         summary = state.get("analysis_summary") or ""
         strategy = state.get("strategy_recommendation") or ""
         if not summary and not strategy:
@@ -281,7 +288,7 @@ class ReportGenerator:
                     lines.append(f"{idx}. {item}")
         return "\n".join(lines)
 
-    def _errors_section(self, state: AgentState) -> str:
+    def _errors_section(self, state: dict[str, Any]) -> str:
         errors = state.get("errors") or []
         if not errors:
             return ""

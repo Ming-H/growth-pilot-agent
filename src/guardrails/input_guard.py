@@ -28,7 +28,11 @@ def check_prompt_injection(text: str) -> GuardrailResult:
     return GuardrailResult(passed=True, sanitized_input=text)
 
 
-def validate_input(query: str, budget: float | None = None) -> GuardrailResult:
+def validate_input(
+    query: str,
+    budget: float | None = None,
+    scope: str | None = None,
+) -> GuardrailResult:
     """Validate user input before processing."""
     if not query or len(query.strip()) < 5:
         return GuardrailResult(passed=False, reason="Query too short")
@@ -41,5 +45,20 @@ def validate_input(query: str, budget: float | None = None) -> GuardrailResult:
 
     if budget is not None and (budget < 0 or budget > 1_000_000):
         return GuardrailResult(passed=False, reason="Budget out of valid range")
+
+    # Scope validation
+    VALID_SCOPES = {"prospect", "conversion", "subsidy", "retention", "ad", "full", ""}
+    if scope is not None and scope not in VALID_SCOPES:
+        return GuardrailResult(
+            passed=False,
+            reason=f"Invalid scope: '{scope}'. Must be one of: {', '.join(sorted(VALID_SCOPES))}",
+        )
+
+    # Minimum budget check for subsidy scope
+    if scope == "subsidy" and (budget is None or budget <= 0):
+        return GuardrailResult(
+            passed=False,
+            reason="Budget must be greater than 0 for subsidy scope",
+        )
 
     return GuardrailResult(passed=True, sanitized_input=query.strip())

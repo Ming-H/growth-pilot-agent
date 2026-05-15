@@ -14,16 +14,30 @@ logger = logging.getLogger(__name__)
 # Tool imports with fallback stubs
 # ---------------------------------------------------------------------------
 try:
-    from src.tools.conversion.reach_planner import ReachPlanner
-    from src.tools.conversion.funnel_analyzer import FunnelAnalyzer
-    from src.tools.conversion.slot_allocator import SlotAllocator
+    from src.tools.conversion.attributor import Attributor
     from src.tools.conversion.coupon_designer import CouponDesigner
-except ImportError:
+    from src.tools.conversion.funnel_analyzer import FunnelAnalyzer
+    from src.tools.conversion.reach_planner import ReachPlanner
+    from src.tools.conversion.seasonal_analyzer import SeasonalAnalyzer
+    from src.tools.conversion.slot_allocator import SlotAllocator
+except ImportError as _import_err:
+    import logging as _logging
+    _logging.getLogger(__name__).warning("Tool import failed, using stubs: %s", _import_err)
 
     class _Stub:
-        def __init__(self, *a: Any, **kw: Any) -> None: ...
+        """Stub that raises RuntimeError when any method is called."""
 
-    ReachPlanner = FunnelAnalyzer = SlotAllocator = CouponDesigner = _Stub
+        def __init__(self, *a: Any, **kw: Any) -> None:
+            pass
+
+        def __getattr__(self, name: str) -> Any:
+            def _stub_method(*a: Any, **kw: Any) -> Any:
+                raise RuntimeError(
+                    f"Stub tool: {name}() called but tool is not available (import failed)"
+                )
+            return _stub_method
+
+    ReachPlanner = FunnelAnalyzer = SlotAllocator = CouponDesigner = Attributor = SeasonalAnalyzer = _Stub
 
 
 class ConversionExpert(ExpertAgentBase):
@@ -37,22 +51,23 @@ class ConversionExpert(ExpertAgentBase):
     # ------------------------------------------------------------------
     _KEYWORDS = ("转化", "漏斗", "优惠券", "转化率", "coupon", "funnel", "conversion")
 
-    @classmethod
-    def can_handle(cls, query: str) -> bool:
-        """Return True if *query* mentions conversion-related topics."""
-        lower = query.lower()
-        return any(kw in lower for kw in cls._KEYWORDS)
+    @staticmethod
+    def can_handle(query: str) -> float:
+        """Return confidence score (0-1) for handling this query."""
+        return ExpertAgentBase._keyword_confidence(query, list(ConversionExpert._KEYWORDS))
 
     # ------------------------------------------------------------------
     # Initialisation helpers
     # ------------------------------------------------------------------
     def _init_tools(self) -> dict[str, Any]:
-        """Instantiate and return the four conversion tools."""
+        """Instantiate and return the conversion tools."""
         return {
             "reach_planner": ReachPlanner(),
             "funnel_analyzer": FunnelAnalyzer(),
             "slot_allocator": SlotAllocator(),
             "coupon_designer": CouponDesigner(),
+            "attributor": Attributor(),
+            "seasonal_analyzer": SeasonalAnalyzer(),
         }
 
     def _get_system_prompt(self) -> str:
@@ -69,7 +84,7 @@ class ConversionExpert(ExpertAgentBase):
         Returns a dict with keys: reach_result, funnel_result,
         slot_result, coupon_results, errors.
         """
-        tools = self._init_tools()
+        tools = self._tools
 
         prospect = params.get("prospect_results", {})
         budget = params.get("budget")
@@ -77,68 +92,77 @@ class ConversionExpert(ExpertAgentBase):
         errors: list[str] = []
 
         # 1. Design reach strategy
-        reach_result: dict = {}
-        try:
-            user_segments = self._extract_user_segments(prospect)
-            constraints: dict[str, Any] | None = None
-            if budget is not None:
-                constraints = {"budget": budget}
-            reach_result = tools["reach_planner"].plan_reach_strategy(
+        user_segments = self._extract_user_segments(prospect)
+        constraints: dict[str, Any] | None = None
+        if budget is not None:
+            constraints = {"budget": budget}
+        reach_result = self._safe_execute(
+            lambda: tools["reach_planner"].plan_reach_strategy(
                 user_segments=user_segments,
                 constraints=constraints,
-            )
-        except Exception as exc:
-            logger.warning("ReachPlanner failed: %s", exc)
-            errors.append(f"ReachPlanner: {exc}")
+            ),
+            "ReachPlanner", errors,
+        )
 
         # 2. Analyze funnel
-        funnel_result: dict = {}
-        try:
-            funnel_data = self._get_funnel_data(params)
-            funnel_result = tools["funnel_analyzer"].analyze_funnel(funnel_data)
-        except Exception as exc:
-            logger.warning("FunnelAnalyzer failed: %s", exc)
-            errors.append(f"FunnelAnalyzer: {exc}")
+        funnel_data = self._get_funnel_data(params)
+        funnel_result = self._safe_execute(
+            lambda: tools["funnel_analyzer"].analyze_funnel(funnel_data),
+            "FunnelAnalyzer", errors,
+        )
 
         # 3. Allocate slots
-        slot_result: dict = {}
-        try:
-            user_segments_for_slots = self._build_slot_segments(prospect)
-            slot_result = tools["slot_allocator"].allocate_slots(
+        user_segments_for_slots = self._build_slot_segments(prospect)
+        slot_result = self._safe_execute(
+            lambda: tools["slot_allocator"].allocate_slots(
                 user_segments=user_segments_for_slots,
-            )
-        except Exception as exc:
-            logger.warning("SlotAllocator failed: %s", exc)
-            errors.append(f"SlotAllocator: {exc}")
+            ),
+            "SlotAllocator", errors,
+        )
 
         # 4. Design coupons for each segment
         coupon_results: list[dict] = []
-        try:
-            segment_names = [
-                "new_user", "active", "moderate", "dormant",
-                "high_value", "at_risk",
-            ]
-            budget_constraint = None
-            if budget is not None:
-                budget_constraint = budget * 0.2
-            for seg in segment_names:
-                try:
-                    coupon = tools["coupon_designer"].design_coupon(
-                        user_segment=seg,
-                        budget_constraint=budget_constraint,
-                    )
-                    coupon_results.append(coupon)
-                except Exception:
-                    pass
-        except Exception as exc:
-            logger.warning("CouponDesigner failed: %s", exc)
-            errors.append(f"CouponDesigner: {exc}")
+        segment_names = [
+            "new_user", "active", "moderate", "dormant",
+            "high_value", "at_risk",
+        ]
+        budget_constraint = None
+        if budget is not None:
+            budget_constraint = budget * 0.2
+        for seg in segment_names:
+            coupon = self._safe_execute(
+                lambda s=seg: tools["coupon_designer"].design_coupon(
+                    user_segment=s,
+                    budget_constraint=budget_constraint,
+                ),
+                "CouponDesigner", errors, default=None,
+            )
+            if coupon is not None:
+                coupon_results.append(coupon)
+
+        # 5. Attribution analysis
+        attribution_result = self._safe_execute(
+            lambda: tools["attributor"].compare_models(
+                self._build_attribution_journeys(params),
+            ),
+            "Attributor", errors,
+        )
+
+        # 6. Seasonal analysis
+        seasonal_result = self._safe_execute(
+            lambda: tools["seasonal_analyzer"].detect_seasonality(
+                self._build_seasonal_metrics(params),
+            ),
+            "SeasonalAnalyzer", errors,
+        )
 
         return {
             "reach_result": reach_result,
             "funnel_result": funnel_result,
             "slot_result": slot_result,
             "coupon_results": coupon_results,
+            "attribution_result": attribution_result,
+            "seasonal_result": seasonal_result,
             "errors": errors,
         }
 
@@ -263,3 +287,49 @@ class ConversionExpert(ExpertAgentBase):
             "moderate": {"count": 6000, "ltv": 120, "priority": 3},
             "dormant": {"count": 3000, "ltv": 60, "priority": 2},
         }
+
+    @staticmethod
+    def _build_attribution_journeys(params: dict) -> "pd.DataFrame":
+        """Build sample journey data for attribution from params or defaults."""
+        import pandas as pd
+
+        # Use provided journeys or generate sample data
+        journeys = params.get("journeys")
+        if isinstance(journeys, pd.DataFrame):
+            return journeys
+
+        # Generate sample journeys for demo
+        import numpy as np
+        rng = np.random.RandomState(42)
+        channels = ["金刚位", "Banner", "Push", "SMS"]
+        actions = ["view", "click", "convert"]
+        n = 200
+        return pd.DataFrame({
+            "user_id": rng.randint(1, 51, n),
+            "channel": [channels[i] for i in rng.randint(0, len(channels), n)],
+            "action": [actions[i] for i in rng.randint(0, len(actions), n)],
+            "timestamp": pd.date_range("2025-01-01", periods=n, freq="6h"),
+            "converted": rng.binomial(1, 0.15, n),
+            "conversion_value": rng.exponential(80, n).round(2),
+        })
+
+    @staticmethod
+    def _build_seasonal_metrics(params: dict) -> "pd.DataFrame":
+        """Build sample daily metrics for seasonality from params or defaults."""
+        import pandas as pd
+
+        metrics = params.get("daily_metrics")
+        if isinstance(metrics, pd.DataFrame):
+            return metrics
+
+        # Generate sample 90-day metrics for demo
+        import numpy as np
+        rng = np.random.RandomState(42)
+        n = 90
+        base = 500
+        weekly = np.array([0.9, 1.0, 1.05, 1.1, 1.15, 1.3, 1.2])  # Mon-Sun pattern
+        values = base * weekly[np.arange(n) % 7] + rng.normal(0, 30, n)
+        return pd.DataFrame({
+            "date": pd.date_range("2025-01-01", periods=n),
+            "value": np.maximum(values, 0).round(0),
+        })

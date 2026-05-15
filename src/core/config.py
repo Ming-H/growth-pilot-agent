@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import functools
-import os
 from pathlib import Path
 from typing import Any, Literal
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     # Fallback model
     fallback_provider: str = "openai"
     fallback_model: str = "glm-4.7"
+
+    # Circuit breaker / resilience
+    fallback_enabled: bool = True
+    circuit_breaker_threshold: int = 5
+    circuit_breaker_recovery_seconds: float = 60.0
 
     # Model tiers configuration
     model_tiers: dict[str, dict[str, Any]] = {
@@ -44,12 +49,17 @@ class Settings(BaseSettings):
     data_dir: Path = Path("data")
     output_dir: Path = Path("reports")
 
-    # Chief Agent configuration
-    chief_max_iterations: int = 10
-    chief_model_tier: str = "power"
+    # Expert model configuration
     expert_model_tier: str = "default"
-    chief_enable_evaluator: bool = False
-    chief_max_plan_steps: int = 6
+
+    # Graph configuration
+    max_refinement_rounds: int = 2
+    quality_threshold: float = 0.7
+    budget_approval_threshold: float = 10_000
+    expert_timeout_seconds: int = 120
+
+    # SSE streaming
+    sse_timeout_seconds: int = 300
 
     # Database
     db_url: str = "postgresql+asyncpg://gpa:gpa@localhost:5432/growth_pilot"
@@ -65,11 +75,29 @@ class Settings(BaseSettings):
     # Demo mode
     demo_mode: bool = False
 
+    # CORS
+    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:8000"]
+
     # Observability
     otel_enabled: bool = False
     otel_service_name: str = "growth-pilot-agent"
 
+    # LangSmith tracing
+    langsmith_enabled: bool = False
+    langsmith_api_key: str = ""
+    langsmith_project: str = "growth-pilot"
+
     model_config = {"env_prefix": "GPA_", "env_file": ".env", "extra": "ignore"}
+
+    @model_validator(mode="after")
+    def _validate_security(self) -> "Settings":
+        if not self.demo_mode and self.jwt_secret == "change-me-in-production":
+            import logging
+            logging.getLogger(__name__).warning(
+                "Default JWT secret detected in non-demo mode. "
+                "Set GPA_JWT_SECRET to a secure random string."
+            )
+        return self
 
 
 @functools.lru_cache(maxsize=1)

@@ -97,9 +97,15 @@ class RetryMiddleware(AgentMiddleware):
 
 def build_middleware_stack(
     log_level: str = "INFO",
-    max_retries: int = 3,
+    max_retries: int | None = None,
 ) -> list[AgentMiddleware]:
-    """Build the middleware stack with default ordering."""
+    """Build the middleware stack with default ordering.
+
+    When *max_retries* is ``None``, reads from ``Settings.max_retries``.
+    """
+    if max_retries is None:
+        from src.core.config import get_settings
+        max_retries = get_settings().max_retries
     return [
         ToolErrorHandlingMiddleware(),
         RetryMiddleware(max_retries=max_retries),

@@ -7,10 +7,8 @@ claim and redemption rates based on historical data.
 from __future__ import annotations
 
 import logging
-import math
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from src.tools.registry import ToolRegistry

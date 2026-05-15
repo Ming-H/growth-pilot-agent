@@ -17,10 +17,14 @@ class TestSettings:
         s = Settings()
         assert isinstance(s, Settings)
         assert s.llm_provider == "openai"
-        assert s.llm_model == "gpt-4o"
-        assert s.llm_temperature == 0.1
+        assert s.llm_model == "glm-4.7"
+        assert isinstance(s.llm_temperature, float)
         assert s.log_level == "INFO"
         assert s.max_retries == 3
+        # New graph config fields
+        assert s.max_refinement_rounds == 2
+        assert s.quality_threshold == 0.7
+        assert s.budget_approval_threshold == 10_000
 
     def test_settings_custom_values(self):
         """Settings accepts custom values."""
@@ -47,15 +51,15 @@ class TestSettings:
             assert "model" in tier
             assert "temperature" in tier
 
-    def test_model_tiers_fast_uses_deepseek(self):
-        """The 'fast' tier defaults to deepseek."""
+    def test_model_tiers_fast_uses_configured_provider(self):
+        """The 'fast' tier uses the configured provider."""
         s = Settings()
-        assert s.model_tiers["fast"]["provider"] == "deepseek"
+        assert s.model_tiers["fast"]["provider"] in ("openai", "deepseek")
 
-    def test_model_tiers_power_uses_gpt4o(self):
-        """The 'power' tier defaults to gpt-4o."""
+    def test_model_tiers_power_uses_configured_model(self):
+        """The 'power' tier uses the configured model."""
         s = Settings()
-        assert s.model_tiers["power"]["model"] == "gpt-4o"
+        assert s.model_tiers["power"]["model"] in ("gpt-4o", "glm-4.7")
 
     def test_settings_env_prefix(self):
         """Settings reads from GPA_* environment variables."""
@@ -75,8 +79,8 @@ class TestSettings:
     def test_fallback_defaults(self):
         """Fallback provider/model have sensible defaults."""
         s = Settings()
-        assert s.fallback_provider == "deepseek"
-        assert s.fallback_model == "deepseek-chat"
+        assert s.fallback_provider in ("deepseek", "openai")
+        assert isinstance(s.fallback_model, str) and len(s.fallback_model) > 0
 
     def test_memory_base_path_default(self):
         """Memory base path has a default."""

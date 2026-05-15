@@ -4,7 +4,6 @@ from __future__ import annotations
 import abc
 import logging
 import time
-from typing import Any
 
 logger = logging.getLogger(__name__)
 

@@ -27,13 +27,29 @@ class AnalysisStatus(enum.Enum):
     FAILED = "failed"
 
 
+def _replace_by_expert(
+    existing: list[dict[str, Any]],
+    new: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Reducer that replaces results by expert key instead of appending.
+
+    When a refinement loop re-runs an expert, the new result replaces the
+    old one for the same expert key, preventing duplicate accumulation.
+    Results without an ``expert`` key are appended as before.
+    """
+    if not new:
+        return existing
+    replace_keys = {item.get("expert") for item in new if "expert" in item}
+    kept = [r for r in existing if r.get("expert") not in replace_keys]
+    return kept + new
+
+
 class AnalysisState(TypedDict):
     """Graph state for the LangGraph StateGraph DAG.
 
     Fields are grouped by the phase that primarily reads/writes them.
-    List fields use ``Annotated[..., operator.add]`` reducers so that
-    parallel nodes (e.g. expert execution) can append independently and
-    LangGraph merges the results automatically.
+    ``expert_results`` uses a custom reducer that merges by expert key,
+    preventing duplicate accumulation during refinement loops.
     """
 
     # ── Input ────────────────────────────────────────────────────────────
@@ -48,7 +64,7 @@ class AnalysisState(TypedDict):
     selected_experts: NotRequired[list[str]]
 
     # ── Execution ────────────────────────────────────────────────────────
-    expert_results: Annotated[list[dict[str, Any]], operator.add]
+    expert_results: Annotated[list[dict[str, Any]], _replace_by_expert]
     execution_errors: Annotated[list[str], operator.add]
 
     # ── Evaluation ───────────────────────────────────────────────────────

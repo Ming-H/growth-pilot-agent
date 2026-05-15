@@ -12,6 +12,7 @@ dependencies = [
     # Agent framework
     "langgraph>=0.2",
     "langgraph-checkpoint>=0.1",
+    "langgraph-checkpoint-postgres>=0.1",
     "langchain-core>=0.3",
     # LLM
     "openai>=1.30",
@@ -65,6 +66,9 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "ruff>=0.4",
+]
+chinese = [
+    "jieba>=0.42",
 ]
 
 [project.scripts]

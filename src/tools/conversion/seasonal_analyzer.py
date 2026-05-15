@@ -7,16 +7,19 @@ forecasts demand, and provides a campaign calendar for Didi freight.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 import numpy as np
 import pandas as pd
 from scipy import signal, stats
 
+from src.tools.registry import register
+
 logger = logging.getLogger(__name__)
 
 
+@register("seasonal_analyzer", category="conversion")
 class SeasonalAnalyzer:
     """Detect seasonal patterns and plan marketing campaigns."""
 

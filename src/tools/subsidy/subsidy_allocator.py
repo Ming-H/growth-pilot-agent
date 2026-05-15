@@ -9,8 +9,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import numpy as np
-import pandas as pd
 
 from src.tools.registry import ToolRegistry
 
@@ -37,6 +35,7 @@ class SubsidyAllocator:
         elasticity_results: dict[str, Any],
         budget_plan: dict[str, Any],
         user_segments: dict[str, int] | None = None,
+        aov_defaults: dict[str, float] | None = None,
     ) -> dict[str, Any]:
         """Generate final per-segment subsidy plan.
 
@@ -49,6 +48,9 @@ class SubsidyAllocator:
                 Expected structure: {"allocation": {seg: {coupon_amount, ...}}}.
             user_segments: optional mapping of segment -> user_count. If not
                 provided, extracted from budget_plan.
+            aov_defaults: optional per-segment AOV overrides, e.g.
+                {"new_user": 50.0, "high_value": 150.0}. Segments not present
+                fall back to the built-in defaults.
 
         Returns:
             Final subsidy plan with per-segment coupon details, thresholds,
@@ -73,6 +75,9 @@ class SubsidyAllocator:
         total_expected_orders = 0.0
         total_expected_revenue = 0.0
 
+        # Merge caller-provided AOV overrides with built-in defaults
+        _aov_defaults = aov_defaults or {}
+
         for seg_name, seg_allocation in allocation.items():
             coupon_amount = seg_allocation.get("coupon_amount", 0)
             user_count = seg_allocation.get("user_count", 0)
@@ -89,8 +94,8 @@ class SubsidyAllocator:
                 seg_name, coupon_amount, elasticity, coupon_config
             )
 
-            # Estimate expected revenue (assume average order value ~ 80 yuan)
-            aov_estimate = self._estimate_aov(seg_name)
+            # Estimate expected revenue using parameterized AOV
+            aov_estimate = _aov_defaults.get(seg_name, self._estimate_aov(seg_name))
             expected_revenue = expected_inc * aov_estimate
 
             seg_cost = user_count * coupon_amount

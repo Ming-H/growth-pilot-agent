@@ -1,12 +1,10 @@
 """Tests for src.core.models - Pydantic structured models."""
-
 from __future__ import annotations
 
 import pytest
 
 from src.core.models import (
     AgentResult,
-    AnalysisOutput,
     ConversionResult,
     LLMAnalysis,
     KpiSnapshot,
@@ -17,7 +15,6 @@ from src.core.models import (
     AdResult,
     BidResult,
     ChurnRisk,
-    result_to_state_update,
 )
 
 
@@ -29,7 +26,7 @@ class TestAgentResult:
         assert r.success is True
         assert r.errors == []
         assert r.agent_name == ""
-        assert r.timestamp != ""  # auto-generated
+        assert r.timestamp != ""
 
     def test_custom_values(self):
         r = AgentResult(success=False, errors=["err1"], agent_name="test")
@@ -49,7 +46,6 @@ class TestLLMAnalysis:
         assert a.extra == {}
 
     def test_confidence_bounds(self):
-        """Confidence must be between 0.0 and 1.0."""
         a = LLMAnalysis(confidence=0.75)
         assert a.confidence == 0.75
 
@@ -76,30 +72,6 @@ class TestProspectResult:
             rfm_result_count=3,
         )
         assert r.segment_summary["high_intent"].count == 100
-
-    def test_result_to_state_update(self):
-        r = ProspectResult(
-            user_count=500,
-            segment_summary={"vip": SegmentInfo(count=50, ratio=0.1)},
-        )
-        update = result_to_state_update(r)
-        # Base keys are removed
-        assert "success" not in update
-        assert "agent_name" not in update
-        assert "timestamp" not in update
-        # Result keys remain
-        assert update["user_count"] == 500
-        assert "segment_summary" in update
-
-    def test_result_to_state_update_with_errors(self):
-        r = ProspectResult(success=False, errors=["failed to load data"])
-        update = result_to_state_update(r)
-        assert update["errors"] == ["failed to load data"]
-
-    def test_result_to_state_update_no_errors(self):
-        r = ProspectResult(success=True, errors=[])
-        update = result_to_state_update(r)
-        assert "errors" not in update
 
 
 class TestConversionResult:
@@ -133,24 +105,6 @@ class TestAdResult:
         assert r.bid_result.optimized_bid == 8.5
 
 
-class TestAnalysisOutput:
-    def test_creation(self):
-        out = AnalysisOutput(
-            analysis_summary="Test summary",
-            strategy_recommendation="Test strategy",
-        )
-        assert out.agent_name == "orchestrator"
-        assert out.analysis_summary == "Test summary"
-
-    def test_with_sub_results(self):
-        out = AnalysisOutput(
-            prospect_results=ProspectResult(user_count=100),
-        )
-        assert out.prospect_results is not None
-        assert out.prospect_results.user_count == 100
-        assert out.conversion_results is None
-
-
 class TestKpiSnapshot:
     def test_default_values(self):
         kpi = KpiSnapshot()
@@ -171,8 +125,6 @@ class TestInvalidData:
             LLMAnalysis(confidence=5.0)
 
     def test_churn_risk_no_validation(self):
-        """ChurnRisk fields have no built-in bounds validation (0-1 not enforced)."""
-        # ChurnRisk fields are plain floats without ge/le constraints
         cr = ChurnRisk(high_risk_ratio=1.5)
         assert cr.high_risk_ratio == 1.5
 

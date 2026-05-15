@@ -17,7 +17,6 @@ from typing import Any
 
 from src.prompts.templates.base import PromptTemplate
 
-
 # =====================================================================
 # Orchestrator
 # =====================================================================

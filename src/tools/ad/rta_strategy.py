@@ -6,8 +6,9 @@ scores, estimated conversion rates, and target CPA constraints.
 
 from __future__ import annotations
 
-import numpy as np
 from typing import Any
+
+import numpy as np
 
 from src.tools.registry import ToolRegistry
 

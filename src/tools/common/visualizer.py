@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 import matplotlib
+
 matplotlib.use("Agg")  # Non-interactive backend for server use
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
