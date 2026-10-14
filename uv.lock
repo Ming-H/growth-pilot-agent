@@ -1163,6 +1163,7 @@ dev = [
     { name = "aiosqlite" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "ruff" },
 ]
 
 [package.metadata]
@@ -1218,6 +1219,7 @@ dev = [
     { name = "aiosqlite", specifier = ">=0.22.1" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
+    { name = "ruff", specifier = ">=0.4" },
 ]
 
 [[package]]
