@@ -3,6 +3,7 @@
 Produces comprehensive evaluation reports with dimension scores,
 overall assessment, and actionable improvement suggestions.
 """
+
 from __future__ import annotations
 
 import logging
@@ -82,6 +83,7 @@ def _get_suggestions(dimension: str, score: float) -> list[str]:
 # Report generator
 # ---------------------------------------------------------------------------
 
+
 class EvalReport:
     """Generate Markdown evaluation reports from EvalResult list.
 
@@ -113,12 +115,14 @@ class EvalReport:
         return "\n\n".join(sections)
 
     def _header(self) -> str:
-        return "\n".join([
-            "# GrowthPilot Agent 评测报告",
-            "",
-            f"> 生成时间: {self.generated_at}",
-            f"> 样本数量: {len(self.results)}",
-        ])
+        return "\n".join(
+            [
+                "# GrowthPilot Agent 评测报告",
+                "",
+                f"> 生成时间: {self.generated_at}",
+                f"> 样本数量: {len(self.results)}",
+            ]
+        )
 
     def _overall_summary(self) -> str:
         """Overall score summary table."""
@@ -185,7 +189,9 @@ class EvalReport:
         for i, r in enumerate(self.results, 1):
             lines.append(f"### {i}. {r.agent_name} (总分: {r.overall_score:.2f})")
             lines.append("")
-            lines.append(f"**输入查询**: {r.input_query[:100]}{'...' if len(r.input_query) > 100 else ''}")
+            lines.append(
+                f"**输入查询**: {r.input_query[:100]}{'...' if len(r.input_query) > 100 else ''}"
+            )
             lines.append("")
             lines.append("| 维度 | 分数 | 评估说明 |")
             lines.append("|------|------|----------|")
@@ -220,7 +226,9 @@ class EvalReport:
         ]
 
         for dim in dims:
-            dim_results = [(r.agent_name, r.dimensions[dim]) for r in self.results if dim in r.dimensions]
+            dim_results = [
+                (r.agent_name, r.dimensions[dim]) for r in self.results if dim in r.dimensions
+            ]
             if not dim_results:
                 continue
 
@@ -289,11 +297,13 @@ class EvalReport:
         return "\n".join(lines)
 
     def _footer(self) -> str:
-        return "\n".join([
-            "---",
-            "",
-            f"*报告由 GrowthPilot EvalReport 自动生成 @ {self.generated_at}*",
-        ])
+        return "\n".join(
+            [
+                "---",
+                "",
+                f"*报告由 GrowthPilot EvalReport 自动生成 @ {self.generated_at}*",
+            ]
+        )
 
     # ------------------------------------------------------------------
     # Helpers
@@ -319,6 +329,7 @@ class EvalReport:
     def save(self, path: str) -> None:
         """Save the report to a Markdown file."""
         from pathlib import Path
+
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(self.to_markdown(), encoding="utf-8")

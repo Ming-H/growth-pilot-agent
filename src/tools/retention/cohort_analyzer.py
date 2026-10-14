@@ -100,28 +100,28 @@ class CohortAnalyzer:
         if period == "D":
             df["cohort_period"] = df["cohort_date"].dt.date
         elif period == "W":
-            df["cohort_period"] = df["cohort_date"].dt.to_period("W").apply(
-                lambda p: p.start_time.date()
+            df["cohort_period"] = (
+                df["cohort_date"].dt.to_period("W").apply(lambda p: p.start_time.date())
             )
         elif period == "M":
-            df["cohort_period"] = df["cohort_date"].dt.to_period("M").apply(
-                lambda p: p.start_time.date()
+            df["cohort_period"] = (
+                df["cohort_date"].dt.to_period("M").apply(lambda p: p.start_time.date())
             )
         else:
-            df["cohort_period"] = df["cohort_date"].dt.to_period(period).apply(
-                lambda p: p.start_time.date()
+            df["cohort_period"] = (
+                df["cohort_date"].dt.to_period(period).apply(lambda p: p.start_time.date())
             )
 
         # Period offset (number of periods since cohort start)
         if period == "D":
             df["period_offset"] = (df["order_date"] - df["cohort_date"]).dt.days
         elif period == "W":
-            df["period_offset"] = ((df["order_date"] - df["cohort_date"]).dt.days // 7)
+            df["period_offset"] = (df["order_date"] - df["cohort_date"]).dt.days // 7
         elif period == "M":
             delta = df["order_date"].dt.to_period("M") - df["cohort_date"].dt.to_period("M")
             df["period_offset"] = delta.apply(lambda p: p.n if hasattr(p, "n") else int(p))
         else:
-            df["period_offset"] = ((df["order_date"] - df["cohort_date"]).dt.days // 7)
+            df["period_offset"] = (df["order_date"] - df["cohort_date"]).dt.days // 7
 
         # Clip to observation window
         max_offset_days = self.observation_window
@@ -135,17 +135,11 @@ class CohortAnalyzer:
         df["period_offset"] = df["period_offset"].astype(int)
 
         # Cohort sizes
-        cohort_sizes = (
-            df.groupby("cohort_period")["user_id"].nunique().reset_index()
-        )
+        cohort_sizes = df.groupby("cohort_period")["user_id"].nunique().reset_index()
         cohort_sizes.columns = ["cohort_period", "cohort_size"]
 
         # Retained users per (cohort, offset)
-        retained = (
-            df.groupby(["cohort_period", "period_offset"])["user_id"]
-            .nunique()
-            .reset_index()
-        )
+        retained = df.groupby(["cohort_period", "period_offset"])["user_id"].nunique().reset_index()
         retained.columns = ["cohort_period", "period_offset", "retained_users"]
 
         # Merge and compute rate
@@ -218,11 +212,13 @@ class CohortAnalyzer:
             smoothed = np.convolve(curve, kernel, mode="valid")
             # Pad to original length
             pad = (len(curve) - len(smoothed)) // 2
-            smoothed = np.concatenate([
-                np.full(pad, smoothed[0]),
-                smoothed,
-                np.full(len(curve) - len(smoothed) - pad, smoothed[-1]),
-            ])
+            smoothed = np.concatenate(
+                [
+                    np.full(pad, smoothed[0]),
+                    smoothed,
+                    np.full(len(curve) - len(smoothed) - pad, smoothed[-1]),
+                ]
+            )
         else:
             smoothed = curve.copy()
 
@@ -252,7 +248,6 @@ class CohortAnalyzer:
 
         # Select the most prominent inflection
         best_idx: int | None = None
-        best_type: str = "drop"
 
         # Prefer identified local minima (significant drop-offs)
         if len(local_min_indices) > 0:
@@ -261,7 +256,6 @@ class CohortAnalyzer:
             best_min = local_min_indices[np.argmin(slopes_at_mins)]
             if abs(slopes[best_min]) >= prominence_threshold:
                 best_idx = int(best_min)
-                best_type = "drop"
 
         # Check for stabilisation (slope approaching 0 after a drop)
         if len(local_max_indices) > 0:
@@ -269,12 +263,10 @@ class CohortAnalyzer:
                 if idx > 1 and slopes[idx] > 0 and abs(slopes[idx]) >= prominence_threshold * 0.5:
                     if best_idx is None or idx > best_idx:
                         best_idx = int(idx)
-                        best_type = "stabilisation"
 
         # Fallback: use the period with the steepest single-period drop
         if best_idx is None:
             best_idx = max_drop_idx
-            best_type = "drop"
 
         # Compute slopes before and after inflection
         if best_idx > 0:

@@ -1,4 +1,5 @@
 """SQLAlchemy ORM models for GrowthPilot Agent."""
+
 from __future__ import annotations
 
 import uuid
@@ -30,6 +31,7 @@ def _now() -> datetime:
 
 # ── Organization ──────────────────────────────────────────────
 
+
 class Organization(Base):
     __tablename__ = "organizations"
 
@@ -48,6 +50,7 @@ class Organization(Base):
 
 
 # ── User ──────────────────────────────────────────────────────
+
 
 class User(Base):
     __tablename__ = "users"
@@ -71,6 +74,7 @@ class User(Base):
 
 
 # ── Analysis ──────────────────────────────────────────────────
+
 
 class Analysis(Base):
     __tablename__ = "analyses"
@@ -98,12 +102,11 @@ class Analysis(Base):
 
     user: Mapped["User"] = relationship(back_populates="analyses")
 
-    __table_args__ = (
-        Index("ix_analyses_org_created", "org_id", "created_at"),
-    )
+    __table_args__ = (Index("ix_analyses_org_created", "org_id", "created_at"),)
 
 
 # ── Memory Entry ──────────────────────────────────────────────
+
 
 class MemoryEntry(Base):
     __tablename__ = "memory_entries"
@@ -117,6 +120,4 @@ class MemoryEntry(Base):
     relevance_tags: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
-    __table_args__ = (
-        Index("ix_memory_org_scope", "org_id", "scope"),
-    )
+    __table_args__ = (Index("ix_memory_org_scope", "org_id", "scope"),)

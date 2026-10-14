@@ -6,6 +6,7 @@ Design principles:
 - User-growth domain-specific defaults
 - No external dependencies beyond jinja2 (already in pyproject.toml)
 """
+
 from __future__ import annotations
 
 import logging

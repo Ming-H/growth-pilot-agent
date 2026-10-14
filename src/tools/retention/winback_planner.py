@@ -160,9 +160,7 @@ class WinbackPlanner:
             plan[segment_name] = strategy
 
         # Overall plan summary
-        total_cost = sum(
-            p.get("estimated_cost", 0) for p in plan.values() if isinstance(p, dict)
-        )
+        total_cost = sum(p.get("estimated_cost", 0) for p in plan.values() if isinstance(p, dict))
         total_winbacks = sum(
             p.get("estimated_winbacks", 0) for p in plan.values() if isinstance(p, dict)
         )
@@ -172,7 +170,8 @@ class WinbackPlanner:
             "total_estimated_cost": round(total_cost, 2),
             "total_estimated_winbacks": total_winbacks,
             "overall_winback_rate": round(
-                total_winbacks / max(
+                total_winbacks
+                / max(
                     sum(p.get("user_count", 0) for p in plan.values() if isinstance(p, dict)),
                     1,
                 ),
@@ -213,14 +212,19 @@ class WinbackPlanner:
                 return dict(self.strategies.get(mapped, self.strategies["price_sensitive"]))
 
         # Default: price_sensitive strategy
-        return dict(self.strategies.get("price_sensitive", {
-            "strategy": "general_discount",
-            "channels": ["push"],
-            "offer": "欢迎回来 – 专属优惠",
-            "expected_winback_rate": 0.05,
-            "budget_per_user": 10.0,
-            "timing": "immediate",
-        }))
+        return dict(
+            self.strategies.get(
+                "price_sensitive",
+                {
+                    "strategy": "general_discount",
+                    "channels": ["push"],
+                    "offer": "欢迎回来 – 专属优惠",
+                    "expected_winback_rate": 0.05,
+                    "budget_per_user": 10.0,
+                    "timing": "immediate",
+                },
+            )
+        )
 
     @staticmethod
     def _load_historical_performance(

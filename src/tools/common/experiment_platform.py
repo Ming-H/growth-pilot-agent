@@ -198,7 +198,12 @@ class ExperimentPlatform:
             elif method == "bayesian":
                 test_result = self._bayesian_test(control_vals, treat_vals)
             else:
-                return {"error": f"Unknown method '{method}'. Use t_test, chi_square, sequential, or bayesian"}
+                return {
+                    "error": (
+                        f"Unknown method '{method}'. "
+                        "Use t_test, chi_square, sequential, or bayesian"
+                    )
+                }
 
             comparison = {
                 "control": control_name,
@@ -210,20 +215,18 @@ class ExperimentPlatform:
             }
             results_per_comparison.append(comparison)
 
-        # For single comparison (2 groups), flatten results
-        if len(treatment_names) == 1:
-            primary_result = results_per_comparison[0]
-        else:
-            primary_result = results_per_comparison
-
         return {
             "method": method,
             "metric": metric,
             "groups": group_stats,
             "lift": results_per_comparison[0]["lift"] if results_per_comparison else None,
-            "confidence_interval": results_per_comparison[0].get("confidence_interval") if results_per_comparison else None,
+            "confidence_interval": results_per_comparison[0].get("confidence_interval")
+            if results_per_comparison
+            else None,
             "p_value": results_per_comparison[0].get("p_value") if results_per_comparison else None,
-            "significant": results_per_comparison[0].get("significant", False) if results_per_comparison else False,
+            "significant": results_per_comparison[0].get("significant", False)
+            if results_per_comparison
+            else False,
             "srm_check": srm_check,
             "comparisons": results_per_comparison,
         }
@@ -295,12 +298,14 @@ class ExperimentPlatform:
             cumulative_treatment.extend(day_data.get("treatment", []))
 
             if len(cumulative_control) < 10 or len(cumulative_treatment) < 10:
-                daily_results.append({
-                    "day": day,
-                    "status": "insufficient_data",
-                    "n_control": len(cumulative_control),
-                    "n_treatment": len(cumulative_treatment),
-                })
+                daily_results.append(
+                    {
+                        "day": day,
+                        "status": "insufficient_data",
+                        "n_control": len(cumulative_control),
+                        "n_treatment": len(cumulative_treatment),
+                    }
+                )
                 continue
 
             ctrl_arr = np.array(cumulative_control)
@@ -320,8 +325,10 @@ class ExperimentPlatform:
                 if pooled_std == 0:
                     sprt_stat = 0.0
                 else:
-                    sprt_stat = (treat_mean - ctrl_mean) / pooled_std * np.sqrt(
-                        min(len(ctrl_arr), len(treat_arr))
+                    sprt_stat = (
+                        (treat_mean - ctrl_mean)
+                        / pooled_std
+                        * np.sqrt(min(len(ctrl_arr), len(treat_arr)))
                     )
 
                 # SPRT boundaries
@@ -335,16 +342,18 @@ class ExperimentPlatform:
                 else:
                     status = "continue"
 
-                daily_results.append({
-                    "day": day,
-                    "status": status,
-                    "sprt_statistic": round(sprt_stat, 4),
-                    "upper_bound": round(float(upper_bound), 4),
-                    "lower_bound": round(float(lower_bound), 4),
-                    "lift": round(lift, 4),
-                    "n_control": len(cumulative_control),
-                    "n_treatment": len(cumulative_treatment),
-                })
+                daily_results.append(
+                    {
+                        "day": day,
+                        "status": status,
+                        "sprt_statistic": round(sprt_stat, 4),
+                        "upper_bound": round(float(upper_bound), 4),
+                        "lower_bound": round(float(lower_bound), 4),
+                        "lift": round(lift, 4),
+                        "n_control": len(cumulative_control),
+                        "n_treatment": len(cumulative_treatment),
+                    }
+                )
 
                 if status.startswith("significant"):
                     stopped_early = True
@@ -353,10 +362,16 @@ class ExperimentPlatform:
 
             elif method == "alpha_spend":
                 # O'Brien-Fleming alpha spending function
-                look_idx = len([d for d in daily_results if d.get("status") != "insufficient_data"]) + 1
+                look_idx = (
+                    len([d for d in daily_results if d.get("status") != "insufficient_data"]) + 1
+                )
                 info_fraction = min(look_idx / max(len(sorted_days), 1), 1.0)
                 # OBF spending: 2 - 2*Phi(z_alpha/4 / sqrt(t))
-                z_val = sp_stats.norm.ppf(1 - alpha_spend / 4) / np.sqrt(info_fraction) if info_fraction > 0 else float("inf")
+                z_val = (
+                    sp_stats.norm.ppf(1 - alpha_spend / 4) / np.sqrt(info_fraction)
+                    if info_fraction > 0
+                    else float("inf")
+                )
                 alpha_spent = 2 * (1 - sp_stats.norm.cdf(z_val))
 
                 # Z-test at this look
@@ -373,23 +388,27 @@ class ExperimentPlatform:
 
                 significant = p_val < alpha_spent
 
-                daily_results.append({
-                    "day": day,
-                    "status": "significant" if significant else "continue",
-                    "z_score": round(float(z_score), 4),
-                    "p_value": round(float(p_val), 6),
-                    "alpha_spent": round(float(alpha_spent), 6),
-                    "lift": round(lift, 4),
-                    "n_control": len(cumulative_control),
-                    "n_treatment": len(cumulative_treatment),
-                })
+                daily_results.append(
+                    {
+                        "day": day,
+                        "status": "significant" if significant else "continue",
+                        "z_score": round(float(z_score), 4),
+                        "p_value": round(float(p_val), 6),
+                        "alpha_spent": round(float(alpha_spent), 6),
+                        "lift": round(lift, 4),
+                        "n_control": len(cumulative_control),
+                        "n_treatment": len(cumulative_treatment),
+                    }
+                )
 
                 if significant:
                     stopped_early = True
                     stop_day = day
                     break
             else:
-                return {"error": f"Unknown sequential method '{method}'. Use 'sprt' or 'alpha_spend'"}
+                return {
+                    "error": f"Unknown sequential method '{method}'. Use 'sprt' or 'alpha_spend'"
+                }
 
         # Final verdict
         if stopped_early:
@@ -453,13 +472,15 @@ class ExperimentPlatform:
 
             ice_score = round(impact * confidence * ease, 2)
 
-            scored.append({
-                **item,
-                "impact": impact,
-                "confidence": confidence,
-                "ease": ease,
-                "ice_score": ice_score,
-            })
+            scored.append(
+                {
+                    **item,
+                    "impact": impact,
+                    "confidence": confidence,
+                    "ease": ease,
+                    "ice_score": ice_score,
+                }
+            )
 
         scored.sort(key=lambda x: x["ice_score"], reverse=True)
         return scored
@@ -505,10 +526,12 @@ class ExperimentPlatform:
         treat_success = int(np.sum(treat_arr))
         treat_failure = len(treat_arr) - treat_success
 
-        table = np.array([
-            [ctrl_success, ctrl_failure],
-            [treat_success, treat_failure],
-        ])
+        table = np.array(
+            [
+                [ctrl_success, ctrl_failure],
+                [treat_success, treat_failure],
+            ]
+        )
 
         chi2, p_value, dof, expected = sp_stats.chi2_contingency(table, correction=True)
 
@@ -598,7 +621,11 @@ class ExperimentPlatform:
         # Expected lift
         ctrl_posterior_mean = ctrl_alpha / (ctrl_alpha + ctrl_beta)
         treat_posterior_mean = treat_alpha / (treat_alpha + treat_beta)
-        lift = (treat_posterior_mean - ctrl_posterior_mean) / ctrl_posterior_mean if ctrl_posterior_mean > 0 else 0.0
+        lift = (
+            (treat_posterior_mean - ctrl_posterior_mean) / ctrl_posterior_mean
+            if ctrl_posterior_mean > 0
+            else 0.0
+        )
 
         return {
             "p_value": None,  # Bayesian: no p-value

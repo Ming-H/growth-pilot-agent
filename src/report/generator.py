@@ -113,8 +113,7 @@ class ReportGenerator:
             for name, info in seg.items():
                 if isinstance(info, dict):
                     lines.append(
-                        f"| {name} | {info.get('count', 'N/A')} "
-                        f"| {self._pct(info.get('ratio'))} |"
+                        f"| {name} | {info.get('count', 'N/A')} | {self._pct(info.get('ratio'))} |"
                     )
                 else:
                     lines.append(f"| {name} | {info} | - |")
@@ -157,7 +156,10 @@ class ReportGenerator:
                     )
         if funnel.get("bottleneck"):
             bn = funnel["bottleneck"]
-            lines.append(f"\n**瓶颈环节**: {bn.get('stage', 'N/A')} (转化率: {self._pct(bn.get('stage_conversion_rate'))})")
+            lines.append(
+                f"\n**瓶颈环节**: {bn.get('stage', 'N/A')} "
+                f"(转化率: {self._pct(bn.get('stage_conversion_rate'))})"
+            )
             if bn.get("diagnosis_hint"):
                 lines.append(f"- 诊断: {bn['diagnosis_hint']}")
 

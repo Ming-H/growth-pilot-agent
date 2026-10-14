@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.core.expert import ExpertAgentBase
 from src.prompts.templates.agent_prompts import ConversionPrompt
+
+if TYPE_CHECKING:  # pandas is imported lazily inside methods at runtime
+    import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +25,7 @@ try:
     from src.tools.conversion.slot_allocator import SlotAllocator
 except ImportError as _import_err:
     import logging as _logging
+
     _logging.getLogger(__name__).warning("Tool import failed, using stubs: %s", _import_err)
 
     class _Stub:
@@ -35,9 +39,12 @@ except ImportError as _import_err:
                 raise RuntimeError(
                     f"Stub tool: {name}() called but tool is not available (import failed)"
                 )
+
             return _stub_method
 
-    ReachPlanner = FunnelAnalyzer = SlotAllocator = CouponDesigner = Attributor = SeasonalAnalyzer = _Stub
+    ReachPlanner = FunnelAnalyzer = SlotAllocator = CouponDesigner = Attributor = (
+        SeasonalAnalyzer
+    ) = _Stub
 
 
 class ConversionExpert(ExpertAgentBase):
@@ -101,14 +108,16 @@ class ConversionExpert(ExpertAgentBase):
                 user_segments=user_segments,
                 constraints=constraints,
             ),
-            "ReachPlanner", errors,
+            "ReachPlanner",
+            errors,
         )
 
         # 2. Analyze funnel
         funnel_data = self._get_funnel_data(params)
         funnel_result = self._safe_execute(
             lambda: tools["funnel_analyzer"].analyze_funnel(funnel_data),
-            "FunnelAnalyzer", errors,
+            "FunnelAnalyzer",
+            errors,
         )
 
         # 3. Allocate slots
@@ -117,14 +126,19 @@ class ConversionExpert(ExpertAgentBase):
             lambda: tools["slot_allocator"].allocate_slots(
                 user_segments=user_segments_for_slots,
             ),
-            "SlotAllocator", errors,
+            "SlotAllocator",
+            errors,
         )
 
         # 4. Design coupons for each segment
         coupon_results: list[dict] = []
         segment_names = [
-            "new_user", "active", "moderate", "dormant",
-            "high_value", "at_risk",
+            "new_user",
+            "active",
+            "moderate",
+            "dormant",
+            "high_value",
+            "at_risk",
         ]
         budget_constraint = None
         if budget is not None:
@@ -135,7 +149,9 @@ class ConversionExpert(ExpertAgentBase):
                     user_segment=s,
                     budget_constraint=budget_constraint,
                 ),
-                "CouponDesigner", errors, default=None,
+                "CouponDesigner",
+                errors,
+                default=None,
             )
             if coupon is not None:
                 coupon_results.append(coupon)
@@ -145,7 +161,8 @@ class ConversionExpert(ExpertAgentBase):
             lambda: tools["attributor"].compare_models(
                 self._build_attribution_journeys(params),
             ),
-            "Attributor", errors,
+            "Attributor",
+            errors,
         )
 
         # 6. Seasonal analysis
@@ -153,9 +170,20 @@ class ConversionExpert(ExpertAgentBase):
             lambda: tools["seasonal_analyzer"].detect_seasonality(
                 self._build_seasonal_metrics(params),
             ),
-            "SeasonalAnalyzer", errors,
+            "SeasonalAnalyzer",
+            errors,
         )
 
+        funnel_overall = (
+            funnel_result.get("overall_conversion_rate", 0)
+            if isinstance(funnel_result, dict)
+            else 0
+        )
+        bottleneck_rate = (
+            funnel_result.get("bottleneck", {}).get("stage_conversion_rate", 0)
+            if isinstance(funnel_result, dict)
+            else 0
+        )
         return {
             "reach_result": reach_result,
             "funnel_result": funnel_result,
@@ -163,6 +191,10 @@ class ConversionExpert(ExpertAgentBase):
             "coupon_results": coupon_results,
             "attribution_result": attribution_result,
             "seasonal_result": seasonal_result,
+            "kpis": {
+                "conversion_rate": float(funnel_overall or 0),
+                "funnel_bottleneck_rate": float(bottleneck_rate or 0),
+            },
             "errors": errors,
         }
 
@@ -300,18 +332,21 @@ class ConversionExpert(ExpertAgentBase):
 
         # Generate sample journeys for demo
         import numpy as np
+
         rng = np.random.RandomState(42)
         channels = ["金刚位", "Banner", "Push", "SMS"]
         actions = ["view", "click", "convert"]
         n = 200
-        return pd.DataFrame({
-            "user_id": rng.randint(1, 51, n),
-            "channel": [channels[i] for i in rng.randint(0, len(channels), n)],
-            "action": [actions[i] for i in rng.randint(0, len(actions), n)],
-            "timestamp": pd.date_range("2025-01-01", periods=n, freq="6h"),
-            "converted": rng.binomial(1, 0.15, n),
-            "conversion_value": rng.exponential(80, n).round(2),
-        })
+        return pd.DataFrame(
+            {
+                "user_id": rng.randint(1, 51, n),
+                "channel": [channels[i] for i in rng.randint(0, len(channels), n)],
+                "action": [actions[i] for i in rng.randint(0, len(actions), n)],
+                "timestamp": pd.date_range("2025-01-01", periods=n, freq="6h"),
+                "converted": rng.binomial(1, 0.15, n),
+                "conversion_value": rng.exponential(80, n).round(2),
+            }
+        )
 
     @staticmethod
     def _build_seasonal_metrics(params: dict) -> "pd.DataFrame":
@@ -324,12 +359,15 @@ class ConversionExpert(ExpertAgentBase):
 
         # Generate sample 90-day metrics for demo
         import numpy as np
+
         rng = np.random.RandomState(42)
         n = 90
         base = 500
         weekly = np.array([0.9, 1.0, 1.05, 1.1, 1.15, 1.3, 1.2])  # Mon-Sun pattern
         values = base * weekly[np.arange(n) % 7] + rng.normal(0, 30, n)
-        return pd.DataFrame({
-            "date": pd.date_range("2025-01-01", periods=n),
-            "value": np.maximum(values, 0).round(0),
-        })
+        return pd.DataFrame(
+            {
+                "date": pd.date_range("2025-01-01", periods=n),
+                "value": np.maximum(values, 0).round(0),
+            }
+        )

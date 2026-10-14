@@ -142,9 +142,7 @@ class Attributor:
 
         return self._format_result("linear", attribution, converted["user_id"].nunique())
 
-    def time_decay_attribution(
-        self, journeys: pd.DataFrame, half_life: int = 7
-    ) -> dict[str, Any]:
+    def time_decay_attribution(self, journeys: pd.DataFrame, half_life: int = 7) -> dict[str, Any]:
         """Distribute credit with exponential time decay (more recent = more credit).
 
         Args:
@@ -203,9 +201,7 @@ class Attributor:
             .reset_index()
         )
 
-        return self._format_result(
-            "time_decay", attribution, converted["user_id"].nunique()
-        )
+        return self._format_result("time_decay", attribution, converted["user_id"].nunique())
 
     def u_shaped_attribution(self, journeys: pd.DataFrame) -> dict[str, Any]:
         """U-shaped (bathtub) attribution: 40% first, 40% last, 20% middle.
@@ -237,9 +233,7 @@ class Attributor:
 
             if n_touches == 1:
                 # Single touch: 100% credit
-                records.append(
-                    {"channel": group_sorted.iloc[0]["channel"], "credit": conv_value}
-                )
+                records.append({"channel": group_sorted.iloc[0]["channel"], "credit": conv_value})
             elif n_touches == 2:
                 # Two touches: 50/50
                 for i in range(2):
@@ -285,9 +279,7 @@ class Attributor:
             .reset_index()
         )
 
-        return self._format_result(
-            "u_shaped", attribution, converted["user_id"].nunique()
-        )
+        return self._format_result("u_shaped", attribution, converted["user_id"].nunique())
 
     def compare_models(self, journeys: pd.DataFrame) -> dict[str, Any]:
         """Run all five models and produce a comparison table.
@@ -357,9 +349,7 @@ class Attributor:
         return {
             "models": results,
             "comparison": comp_df.to_dict(orient="records"),
-            "total_converted_users": results.get("first_touch", {}).get(
-                "total_converted_users", 0
-            ),
+            "total_converted_users": results.get("first_touch", {}).get("total_converted_users", 0),
             "summary": "\n".join(summary_lines) if summary_lines else "No comparison data",
         }
 

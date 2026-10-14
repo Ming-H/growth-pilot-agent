@@ -8,6 +8,7 @@ Security features:
 - Content validation for JSON files
 - Symlink detection and rejection
 """
+
 from __future__ import annotations
 
 import json
@@ -99,17 +100,13 @@ class SecureDataLoader:
                 p.relative_to(self.base_dir)
             except ValueError:
                 raise ValueError(
-                    f"Path '{path}' escapes base directory '{self.base_dir}'. "
-                    f"Resolved to: {p}"
+                    f"Path '{path}' escapes base directory '{self.base_dir}'. Resolved to: {p}"
                 )
 
         # Stage 3: File extension check
         if p.suffix.lower() not in self.ALLOWED_EXTENSIONS:
             allowed = ", ".join(sorted(self.ALLOWED_EXTENSIONS))
-            raise ValueError(
-                f"Unsupported file type: '{p.suffix}'. "
-                f"Allowed extensions: {allowed}"
-            )
+            raise ValueError(f"Unsupported file type: '{p.suffix}'. Allowed extensions: {allowed}")
 
         # Stage 4: File size check (only if file exists)
         if p.exists():
@@ -118,8 +115,7 @@ class SecureDataLoader:
                 size_mb = size / (1024 * 1024)
                 limit_mb = self.max_file_size / (1024 * 1024)
                 raise ValueError(
-                    f"File too large: {size_mb:.1f}MB exceeds "
-                    f"limit of {limit_mb:.0f}MB"
+                    f"File too large: {size_mb:.1f}MB exceeds limit of {limit_mb:.0f}MB"
                 )
 
         return p
@@ -150,9 +146,7 @@ class SecureDataLoader:
             raise ValueError(f"File '{p}' is not valid UTF-8: {e}") from e
 
         if not isinstance(content, (dict, list)):
-            raise ValueError(
-                f"JSON root must be a dict or list, got {type(content).__name__}"
-            )
+            raise ValueError(f"JSON root must be a dict or list, got {type(content).__name__}")
 
         return content
 

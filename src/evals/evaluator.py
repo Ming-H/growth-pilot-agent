@@ -2,6 +2,7 @@
 
 Core evaluation logic with LLM-as-Judge for quality assessment.
 """
+
 from __future__ import annotations
 
 import json
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Data models
 # ---------------------------------------------------------------------------
+
 
 class EvalDimensionScore(BaseModel):
     """Score for a single evaluation dimension."""
@@ -114,6 +116,7 @@ _QUALITY_JUDGE_PROMPT = """\
 # Evaluator
 # ---------------------------------------------------------------------------
 
+
 class AgentEvaluator:
     """Multi-dimensional agent output evaluator.
 
@@ -133,7 +136,7 @@ class AgentEvaluator:
         """
         self._llm = llm
         self._latency_benchmarks: dict[str, float] = {
-            "excellent": 2.0,   # seconds
+            "excellent": 2.0,  # seconds
             "good": 5.0,
             "acceptable": 10.0,
             "slow": 30.0,
@@ -205,7 +208,8 @@ class AgentEvaluator:
             agent_name=agent_name,
             input_query=input_query,
             actual_output=output_str,
-            reference_answer=reference_answer or (
+            reference_answer=reference_answer
+            or (
                 json.dumps(expected_output, ensure_ascii=False)
                 if isinstance(expected_output, dict)
                 else str(expected_output or "")
@@ -334,9 +338,9 @@ class AgentEvaluator:
                 details["duplicate_calls"] = duplicates
                 reason += f" {duplicates} duplicate tool calls detected."
 
-        details["tool_names"] = list(set(
-            c.get("tool", c.get("name", "unknown")) for c in tool_calls
-        ))
+        details["tool_names"] = list(
+            set(c.get("tool", c.get("name", "unknown")) for c in tool_calls)
+        )
 
         return EvalDimensionScore(score=min(1.0, score), reason=reason, details=details)
 
@@ -362,8 +366,11 @@ class AgentEvaluator:
         try:
             llm = self._get_llm()
             from langchain_core.messages import HumanMessage
+
             response = await llm.ainvoke([HumanMessage(content=prompt)])
-            response_text = response.content if isinstance(response.content, str) else str(response.content)
+            response_text = (
+                response.content if isinstance(response.content, str) else str(response.content)
+            )
 
             # Parse judge response
             parsed = self._parse_judge_response(response_text)
@@ -456,6 +463,7 @@ class AgentEvaluator:
 
         # Fallback: try to find any JSON-like structure
         import re
+
         brace_match = re.search(r"\{.*\}", text, re.DOTALL)
         if brace_match:
             try:

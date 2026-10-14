@@ -1,4 +1,5 @@
 """Tests for src.graph.nodes - graph node functions with mocked LLM calls."""
+
 from __future__ import annotations
 
 import json
@@ -7,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.graph.state import AnalysisStatus
-
 
 # ---------------------------------------------------------------------------
 # plan_node
@@ -36,14 +36,18 @@ class TestPlanNode:
         from src.graph.nodes import plan_node
 
         mock_response = MagicMock()
-        mock_response.content = json.dumps({
-            "reasoning": "User asks about acquisition and conversion",
-            "experts": ["prospect", "conversion"],
-            "context_summary": "Growth analysis request",
-        })
+        mock_response.content = json.dumps(
+            {
+                "reasoning": "User asks about acquisition and conversion",
+                "experts": ["prospect", "conversion"],
+                "context_summary": "Growth analysis request",
+            }
+        )
 
-        with patch("src.guardrails.input_guard.validate_input") as mock_validate, \
-             patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm:
+        with (
+            patch("src.guardrails.input_guard.validate_input") as mock_validate,
+            patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm,
+        ):
             mock_validate.return_value = MagicMock(passed=True, sanitized_input=base_state["query"])
             mock_llm = MagicMock()
             mock_llm.ainvoke = AsyncMock(return_value=mock_response)
@@ -65,9 +69,7 @@ class TestPlanNode:
         base_state["query"] = "ab"
 
         with patch("src.guardrails.input_guard.validate_input") as mock_validate:
-            mock_validate.return_value = MagicMock(
-                passed=False, reason="Query too short"
-            )
+            mock_validate.return_value = MagicMock(passed=False, reason="Query too short")
             result = await plan_node(base_state)
 
         assert result["status"] == AnalysisStatus.FAILED
@@ -79,8 +81,10 @@ class TestPlanNode:
         """plan_node falls back to keyword matching when LLM fails."""
         from src.graph.nodes import plan_node
 
-        with patch("src.guardrails.input_guard.validate_input") as mock_validate, \
-             patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm:
+        with (
+            patch("src.guardrails.input_guard.validate_input") as mock_validate,
+            patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm,
+        ):
             mock_validate.return_value = MagicMock(passed=True, sanitized_input=base_state["query"])
             mock_llm = MagicMock()
             mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM unavailable"))
@@ -108,8 +112,10 @@ class TestPlanNode:
             "execution_errors": [],
         }
 
-        with patch("src.guardrails.input_guard.validate_input") as mock_validate, \
-             patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm:
+        with (
+            patch("src.guardrails.input_guard.validate_input") as mock_validate,
+            patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm,
+        ):
             mock_validate.return_value = MagicMock(passed=True, sanitized_input=state["query"])
             mock_llm = MagicMock()
             mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM unavailable"))
@@ -147,13 +153,16 @@ class TestExecuteNode:
         """execute_node runs experts in parallel and collects results."""
         from src.graph.nodes import execute_node
 
-        # Each call must return a fresh dict to avoid shared-mutation bugs
+        # Each call must return a fresh dict to avoid shared-mutation bugs.
+        # Experts are invoked through BaseAgent.run() (full hook lifecycle).
         def make_expert():
             inst = MagicMock()
-            inst.analyze = AsyncMock(return_value={
-                "success": True,
-                "analysis": {"summary": "Analysis result"},
-            })
+            inst.run = AsyncMock(
+                return_value={
+                    "success": True,
+                    "analysis": {"summary": "Analysis result"},
+                }
+            )
             return inst
 
         with patch("src.graph.nodes._create_expert", side_effect=lambda key: make_expert()):
@@ -166,16 +175,35 @@ class TestExecuteNode:
         assert experts_in_result == {"prospect", "conversion"}
 
     @pytest.mark.asyncio
+    async def test_experts_invoked_through_run_lifecycle(self, executing_state):
+        """execute_node routes through BaseAgent.run() so the hook lifecycle
+        (tracing/logging/metrics) executes — not via a bare analyze() call."""
+        from src.graph.nodes import execute_node
+
+        inst = MagicMock()
+        inst.run = AsyncMock(return_value={"success": True, "analysis": {}})
+
+        with patch("src.graph.nodes._create_expert", return_value=inst):
+            await execute_node(executing_state)
+
+        # One run() call per selected expert (prospect + conversion)
+        assert inst.run.await_count == 2
+        call_args = inst.run.await_args[0][0]
+        assert isinstance(call_args, dict)
+        assert call_args["params"]["query"] == "analyze growth"
+        assert call_args["params"]["data_path"] == ""
+
+    @pytest.mark.asyncio
     async def test_handles_expert_exceptions(self, executing_state):
         """execute_node records errors when an expert throws."""
         from src.graph.nodes import execute_node
 
         # First expert succeeds, second throws
         good_expert = MagicMock()
-        good_expert.analyze = AsyncMock(return_value={"success": True, "analysis": {}})
+        good_expert.run = AsyncMock(return_value={"success": True, "analysis": {}})
 
         bad_expert = MagicMock()
-        bad_expert.analyze = AsyncMock(side_effect=RuntimeError("API error"))
+        bad_expert.run = AsyncMock(side_effect=RuntimeError("API error"))
 
         def mock_create(key):
             return good_expert if key == "prospect" else bad_expert
@@ -243,11 +271,17 @@ class TestEvaluateNode:
 
         mock_scores = {
             "prospect": QualityScore(
-                completeness=0.8, actionability=0.85, data_grounding=0.75, overall=0.8, reasoning="Good"
+                completeness=0.8,
+                actionability=0.85,
+                data_grounding=0.75,
+                overall=0.8,
+                reasoning="Good",
             ),
         }
 
-        with patch("src.core.evaluator.batch_evaluate", new_callable=AsyncMock, return_value=mock_scores):
+        with patch(
+            "src.core.evaluator.batch_evaluate", new_callable=AsyncMock, return_value=mock_scores
+        ):
             result = await evaluate_node(evaluating_state)
 
         assert "quality_scores" in result
@@ -262,11 +296,17 @@ class TestEvaluateNode:
 
         mock_scores = {
             "prospect": QualityScore(
-                completeness=0.4, actionability=0.5, data_grounding=0.3, overall=0.4, reasoning="Weak"
+                completeness=0.4,
+                actionability=0.5,
+                data_grounding=0.3,
+                overall=0.4,
+                reasoning="Weak",
             ),
         }
 
-        with patch("src.core.evaluator.batch_evaluate", new_callable=AsyncMock, return_value=mock_scores):
+        with patch(
+            "src.core.evaluator.batch_evaluate", new_callable=AsyncMock, return_value=mock_scores
+        ):
             result = await evaluate_node(evaluating_state)
 
         assert result["needs_refinement"] is True
@@ -280,11 +320,17 @@ class TestEvaluateNode:
 
         mock_scores = {
             "prospect": QualityScore(
-                completeness=0.9, actionability=0.85, data_grounding=0.88, overall=0.88, reasoning="Great"
+                completeness=0.9,
+                actionability=0.85,
+                data_grounding=0.88,
+                overall=0.88,
+                reasoning="Great",
             ),
         }
 
-        with patch("src.core.evaluator.batch_evaluate", new_callable=AsyncMock, return_value=mock_scores):
+        with patch(
+            "src.core.evaluator.batch_evaluate", new_callable=AsyncMock, return_value=mock_scores
+        ):
             result = await evaluate_node(evaluating_state)
 
         assert result["needs_refinement"] is False
@@ -375,8 +421,8 @@ class TestApprovalNode:
     @pytest.mark.asyncio
     async def test_exact_threshold(self):
         """Budget exactly at threshold requires approval."""
-        from src.graph.nodes import approval_node
         from src.core.config import get_settings
+        from src.graph.nodes import approval_node
 
         settings = get_settings()
         threshold = settings.budget_approval_threshold
@@ -409,8 +455,16 @@ class TestReportNode:
             "status": AnalysisStatus.REPORTING,
             "selected_experts": ["prospect", "conversion"],
             "expert_results": [
-                {"expert": "prospect", "success": True, "analysis": {"summary": "User acquisition up 15%"}},
-                {"expert": "conversion", "success": True, "analysis": {"summary": "Funnel conversion at 3.2%"}},
+                {
+                    "expert": "prospect",
+                    "success": True,
+                    "analysis": {"summary": "User acquisition up 15%"},
+                },
+                {
+                    "expert": "conversion",
+                    "success": True,
+                    "analysis": {"summary": "Funnel conversion at 3.2%"},
+                },
             ],
             "execution_errors": [],
             "quality_scores": {
@@ -427,8 +481,10 @@ class TestReportNode:
         mock_response = MagicMock()
         mock_response.content = "# Analysis Report\n\n## Executive Summary\nGrowth is strong."
 
-        with patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm, \
-             patch("src.guardrails.output_guard.validate_output") as mock_validate:
+        with (
+            patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm,
+            patch("src.guardrails.output_guard.validate_output") as mock_validate,
+        ):
             mock_llm = MagicMock()
             mock_llm.ainvoke = AsyncMock(return_value=mock_response)
             mock_create_llm.return_value = mock_llm
@@ -455,8 +511,10 @@ class TestReportNode:
         mock_response = MagicMock()
         mock_response.content = "# Report with failures noted"
 
-        with patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm, \
-             patch("src.guardrails.output_guard.validate_output") as mock_validate:
+        with (
+            patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm,
+            patch("src.guardrails.output_guard.validate_output") as mock_validate,
+        ):
             mock_llm = MagicMock()
             mock_llm.ainvoke = AsyncMock(return_value=mock_response)
             mock_create_llm.return_value = mock_llm
@@ -471,8 +529,10 @@ class TestReportNode:
         """report_node generates a fallback report when LLM fails."""
         from src.graph.nodes import report_node
 
-        with patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm, \
-             patch("src.guardrails.output_guard.validate_output") as mock_validate:
+        with (
+            patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm,
+            patch("src.guardrails.output_guard.validate_output") as mock_validate,
+        ):
             mock_llm = MagicMock()
             mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM down"))
             mock_create_llm.return_value = mock_llm
@@ -481,7 +541,9 @@ class TestReportNode:
             result = await report_node(pre_report_state)
 
         assert result["status"] == AnalysisStatus.COMPLETED
-        assert "# Analysis Report" in result["final_report"]
+        # Deterministic template fallback (ReportGenerator) produces a report
+        # containing the query even without an LLM.
+        assert "增长分析报告" in result["final_report"]
         assert result["cost_usd"] == 0.0
 
     @pytest.mark.asyncio
@@ -492,8 +554,10 @@ class TestReportNode:
         mock_response = MagicMock()
         mock_response.content = "password=secret123 some report text that is long enough"
 
-        with patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm, \
-             patch("src.guardrails.output_guard.validate_output") as mock_validate:
+        with (
+            patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm,
+            patch("src.guardrails.output_guard.validate_output") as mock_validate,
+        ):
             mock_llm = MagicMock()
             mock_llm.ainvoke = AsyncMock(return_value=mock_response)
             mock_create_llm.return_value = mock_llm

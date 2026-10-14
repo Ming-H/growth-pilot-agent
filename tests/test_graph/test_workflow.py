@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-
-from src.graph.state import AnalysisState, AnalysisStatus
+from src.graph.state import AnalysisState
 
 
 class TestGraphBuild:
@@ -49,8 +47,8 @@ class TestGraphBuild:
 class TestRoutingLogic:
     """Tests for the conditional edge routing functions."""
 
-    def test_evaluate_routes_to_execute_on_refine(self):
-        """After evaluate, if refinement needed and round < 2, route to execute."""
+    def test_evaluate_routes_to_refine_when_needed(self):
+        """After evaluate, if refinement needed and round < max, route to refine."""
         from src.graph.graph import _route_after_evaluate
 
         state: AnalysisState = {
@@ -61,7 +59,7 @@ class TestRoutingLogic:
             "refinement_round": 0,
             "approval_required": False,
         }  # type: ignore
-        assert _route_after_evaluate(state) == "execute"
+        assert _route_after_evaluate(state) == "refine"
 
     def test_evaluate_routes_to_approval_when_required(self):
         """After evaluate, if approval required, route to approval."""

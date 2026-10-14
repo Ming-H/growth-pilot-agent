@@ -1,4 +1,5 @@
 """Token usage tracking via LangChain callback handler."""
+
 from __future__ import annotations
 
 import logging
@@ -30,24 +31,35 @@ class CostTracker:
     def record(self, agent: str, model: str, input_tokens: int, output_tokens: int) -> None:
         prices = self.PRICING.get(model, {"input": 0.50, "output": 1.50})
         cost = (input_tokens * prices["input"] + output_tokens * prices["output"]) / 1_000_000
-        self._records.append({
-            "agent": agent,
-            "model": model,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "cost_usd": round(cost, 6),
-        })
+        self._records.append(
+            {
+                "agent": agent,
+                "model": model,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cost_usd": round(cost, 6),
+            }
+        )
 
     @property
     def total_cost(self) -> float:
-        return round(sum(r["cost_usd"] for r in self._records), 6)
+        return round(float(sum(r["cost_usd"] for r in self._records)), 6)
 
     @property
     def total_tokens(self) -> int:
         return sum(r["input_tokens"] + r["output_tokens"] for r in self._records)
 
+    @property
+    def total_input_tokens(self) -> int:
+        return sum(r["input_tokens"] for r in self._records)
+
+    @property
+    def total_output_tokens(self) -> int:
+        return sum(r["output_tokens"] for r in self._records)
+
     def report(self) -> dict[str, Any]:
         from collections import defaultdict
+
         by_agent: dict[str, dict[str, Any]] = defaultdict(
             lambda: {"cost_usd": 0.0, "calls": 0, "tokens": 0}
         )
@@ -58,6 +70,8 @@ class CostTracker:
         return {
             "total_cost_usd": self.total_cost,
             "total_tokens": self.total_tokens,
+            "input_tokens": self.total_input_tokens,
+            "output_tokens": self.total_output_tokens,
             "total_calls": len(self._records),
             "by_agent": dict(by_agent),
         }
@@ -108,9 +122,7 @@ class TokenTrackingCallback(BaseCallbackHandler):
                                     if response.llm_output
                                     else "unknown"
                                 )
-                                model = response_metadata.get(
-                                    "model_name", fallback_model
-                                )
+                                model = response_metadata.get("model_name", fallback_model)
                                 tracker.record(self._agent_name, model, input_tokens, output_tokens)
                                 return
 

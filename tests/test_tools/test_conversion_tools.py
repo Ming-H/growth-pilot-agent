@@ -1,10 +1,9 @@
 """Tests for conversion tools: FunnelAnalyzer, ReachPlanner, SlotAllocator, CouponDesigner."""
+
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # FunnelAnalyzer
@@ -17,6 +16,7 @@ class TestFunnelAnalyzer:
     @pytest.fixture
     def analyzer(self):
         from src.tools.conversion.funnel_analyzer import FunnelAnalyzer
+
         return FunnelAnalyzer()
 
     @pytest.fixture
@@ -44,10 +44,12 @@ class TestFunnelAnalyzer:
         assert result["total_users_converted"] == 300
 
     def test_analyze_funnel_with_dataframe(self, analyzer):
-        df = pd.DataFrame({
-            "stage": ["exposure", "click", "order"],
-            "count": [1000, 300, 50],
-        })
+        df = pd.DataFrame(
+            {
+                "stage": ["exposure", "click", "order"],
+                "count": [1000, 300, 50],
+            }
+        )
         result = analyzer.analyze_funnel(df, stages=["exposure", "click", "order"])
         assert isinstance(result, dict)
         assert result["total_users_entered"] == 1000
@@ -68,11 +70,13 @@ class TestFunnelAnalyzer:
         assert "error" in result
 
     def test_bottleneck_diagnosis(self, analyzer):
-        segment_data = pd.DataFrame({
-            "segment": ["organic", "paid", "social"],
-            "count_before": [500, 300, 200],
-            "count_after": [100, 30, 60],
-        })
+        segment_data = pd.DataFrame(
+            {
+                "segment": ["organic", "paid", "social"],
+                "count_before": [500, 300, 200],
+                "count_after": [100, 30, 60],
+            }
+        )
         result = analyzer.bottleneck_diagnosis("click", segment_data)
         assert isinstance(result, dict)
 
@@ -92,6 +96,7 @@ class TestReachPlanner:
     @pytest.fixture
     def planner(self):
         from src.tools.conversion.reach_planner import ReachPlanner
+
         return ReachPlanner()
 
     @pytest.fixture
@@ -137,6 +142,7 @@ class TestSlotAllocator:
     @pytest.fixture
     def allocator(self):
         from src.tools.conversion.slot_allocator import SlotAllocator
+
         return SlotAllocator()
 
     @pytest.fixture
@@ -170,9 +176,7 @@ class TestSlotAllocator:
                 "new_user": {"ctr": 0.05, "conversion_rate": 0.02},
             },
         }
-        result = allocator.allocate_slots(
-            sample_user_segments, performance_data=perf
-        )
+        result = allocator.allocate_slots(sample_user_segments, performance_data=perf)
         assert isinstance(result, dict)
 
 
@@ -187,6 +191,7 @@ class TestCouponDesigner:
     @pytest.fixture
     def designer(self):
         from src.tools.conversion.coupon_designer import CouponDesigner
+
         return CouponDesigner()
 
     def test_instantiate(self, designer):
@@ -222,14 +227,16 @@ class TestCouponDesigner:
         assert "recommendation" in result
 
     def test_design_coupon_with_history(self, designer):
-        history = pd.DataFrame({
-            "coupon_type": ["折扣券", "满减券"],
-            "amount": [15, 10],
-            "threshold": [0, 30],
-            "claim_rate": [0.4, 0.6],
-            "redemption_rate": [0.2, 0.3],
-            "orders_generated": [50, 80],
-        })
+        history = pd.DataFrame(
+            {
+                "coupon_type": ["折扣券", "满减券"],
+                "amount": [15, 10],
+                "threshold": [0, 30],
+                "claim_rate": [0.4, 0.6],
+                "redemption_rate": [0.2, 0.3],
+                "orders_generated": [50, 80],
+            }
+        )
         result = designer.design_coupon("active", historical_coupon_data=history)
         assert isinstance(result, dict)
         assert "coupon_type" in result

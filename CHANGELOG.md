@@ -7,6 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [7.0.0] - 2026-10-14
+
+### Integrity release — 让每个宣称的机制真实生效
+
+A full pass over the codebase ensuring every advertised feature is actually wired
+into the execution path, all tests green, lint/format clean, and documentation
+matches reality.
+
+### Fixed
+
+- **Hooks lifecycle now executes**: `execute_node`/`refine_node` invoke experts
+  through `BaseAgent.run()` (previously a bare `analyze()` call bypassed
+  tracing/logging/metrics hooks entirely).
+- **Circuit breakers are process-shared** per `(provider, model, endpoint)` —
+  previously every call site owned a private breaker, so a provider-wide outage
+  could never trip a common circuit.
+- **Self-fallback detection**: a fallback identical to the primary (same
+  provider/model/endpoint) is now detected, rejected with a warning, and
+  resilience degrades honestly to primary-only. `fallback_api_key` /
+  `fallback_base_url` settings added; default fallback provider is now
+  DeepSeek (cross-vendor).
+- **Per-run cost attribution**: the global `CostTracker` is reset at the start
+  of every `run_analysis()`; `token_usage` reports a real input/output split
+  (was `output_tokens: 0` and process-lifetime accumulation).
+- **`data_path` flows through the graph**: CLI `--data` / API `data_path` used
+  to be silently dropped by `run_workflow`; now carried in `AnalysisState` into
+  expert params (prospect & retention load real CSV/Parquet).
+- **KPI aggregation standardised**: every expert returns a `kpis` dict merged
+  into `kpi_snapshot` (the old hardcoded keys made `ad_cpa` permanently 0).
+- **Synthetic demo data is feature-correlated**: intent labels are generated
+  from a linear feature score + sigmoid + Bernoulli noise (~8% base rate) and
+  LTV from the same signal with lognormal noise — demo metrics are now
+  meaningful instead of random-label artifacts.
+- **Retry backoff reads settings** (`retry_min_wait`/`retry_max_wait`), capped.
+- **Failed experts skip LLM evaluation** (zero score + `execution_failed`
+  marker) and are excluded from refine — no wasted rounds on crashed pipelines.
+- `refine_node` now applies the same expert timeout as `execute_node`.
+- `CostTracker.total_cost` returns a float (`round(0, 6)` yielded `int`).
+- Stale routing test expectation updated (`"execute"` → `"refine"`).
+
+### Added
+
+- **Memory in the main loop**: `plan_node` retrieves per-org memory
+  (ChromaDB / TF-IDF fallback) and injects it into the planning prompt and
+  expert params as `memory_context`.
+- **`gpa eval` command**: `--router` runs a deterministic, offline router
+  accuracy eval against the builtin dataset (14/14); `--full` runs the
+  pipeline per sample with the multi-dimensional evaluator.
+- **Deterministic report fallback**: `report_node` falls back to the template
+  `ReportGenerator` (previously dead code) when LLM synthesis fails.
+- Circuit-breaker / ResilientLLM test coverage (11 cases, previously none).
+- `power` model tier is now actually used (report synthesis); the evaluator
+  uses the resilient fast tier.
+- Precision-first guardrails: zh+en attack-phrase patterns with
+  false-positive regression tests ("act as", "pretend", "summarize above"
+  are legitimate business phrasing and now pass).
+
+### Removed
+
+- Dead code: `src/graph/expert_subgraph.py` (superseded by hooks-in-run),
+  `BaseAgent._build_prompt_context`, empty `tests/unit/` tree, unused
+  `best_type`/`primary_result`/`rng` locals, unused chromadb import.
+
+### Documentation
+
+- README rewritten to match the real architecture (plan→execute→evaluate DAG,
+  honest highlights each traceable to code, fallback configuration guidance,
+  synthetic-data disclosure).
+- CLAUDE.md updated; Makefile targets fixed (`make test` previously ran an
+  empty `tests/unit/` directory; now runs the full suite via
+  `python -m pytest`).
+
+### Compatibility
+
+- Ruff: N803/N806 ignored (sklearn `X`/`y` convention); `src/evals/dataset.py`
+  exempt from E501. `make lint` now checks both `ruff check` and
+  `ruff format --check` (parity with CI).
+
+---
+
 ## [5.0.0] - 2026-04-21
 
 ### Architecture optimization release — 双轨统一、中间件激活、记忆系统

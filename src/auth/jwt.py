@@ -1,4 +1,5 @@
 """JWT token creation and validation."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -21,9 +22,7 @@ def create_access_token(
     """
     s = get_settings()
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (
-        expires_delta or timedelta(hours=s.jwt_expire_hours)
-    )
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(hours=s.jwt_expire_hours))
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, s.jwt_secret, algorithm=ALGORITHM)
 

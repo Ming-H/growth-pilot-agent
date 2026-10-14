@@ -254,7 +254,9 @@ class FeatureEngine:
         profiles = pd.DataFrame(
             {
                 "user_id": user_ids,
-                "city_tier": rng.choice([1, 2, 3, 4, 5], size=n_users, p=[0.05, 0.15, 0.35, 0.30, 0.15]),
+                "city_tier": rng.choice(
+                    [1, 2, 3, 4, 5], size=n_users, p=[0.05, 0.15, 0.35, 0.30, 0.15]
+                ),
                 "has_freight_search": rng.random(n_users) < 0.08,
                 "has_large_item_search": rng.random(n_users) < 0.10,
             }
@@ -280,16 +282,20 @@ class FeatureEngine:
         fares = distances * rng.uniform(2.0, 3.5, size=n_rides)
         durations = distances * rng.uniform(2.0, 4.0, size=n_rides)  # minutes
 
-        logs = pd.DataFrame(
-            {
-                "user_id": ride_user_ids,
-                "ride_time": ride_times,
-                "distance": distances,
-                "destination_type": destination_types,
-                "fare": fares,
-                "ride_duration": durations,
-            }
-        ).sort_values("ride_time", ascending=False).reset_index(drop=True)
+        logs = (
+            pd.DataFrame(
+                {
+                    "user_id": ride_user_ids,
+                    "ride_time": ride_times,
+                    "distance": distances,
+                    "destination_type": destination_types,
+                    "fare": fares,
+                    "ride_duration": durations,
+                }
+            )
+            .sort_values("ride_time", ascending=False)
+            .reset_index(drop=True)
+        )
 
         return {"user_logs": logs, "user_profile": profiles}
 

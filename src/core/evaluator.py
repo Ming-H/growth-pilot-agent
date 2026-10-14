@@ -3,6 +3,7 @@
 Implements the Evaluator-Optimizer pattern:
 evaluate expert output quality -> if below threshold, generate feedback -> re-invoke expert.
 """
+
 from __future__ import annotations
 
 import json
@@ -11,7 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from src.core.llm_factory import create_llm
+from src.core.llm_factory import create_resilient_llm
 
 logger = logging.getLogger(__name__)
 
@@ -19,12 +20,18 @@ logger = logging.getLogger(__name__)
 class QualityScore(BaseModel):
     """Quality assessment for a single expert's output."""
 
-    completeness: float = Field(ge=0, le=1, description="Does the analysis cover all relevant aspects?")
-    actionability: float = Field(ge=0, le=1, description="Are recommendations specific and implementable?")
+    completeness: float = Field(
+        ge=0, le=1, description="Does the analysis cover all relevant aspects?"
+    )
+    actionability: float = Field(
+        ge=0, le=1, description="Are recommendations specific and implementable?"
+    )
     data_grounding: float = Field(ge=0, le=1, description="Are claims backed by data/metrics?")
     overall: float = Field(ge=0, le=1, description="Weighted composite score")
     reasoning: str = Field(default="", description="Feedback for improvement if score is low")
-    evaluation_failed: bool = Field(default=False, description="Whether the evaluation itself failed")
+    evaluation_failed: bool = Field(
+        default=False, description="Whether the evaluation itself failed"
+    )
 
 
 EVAL_PROMPT = """You are a quality evaluator for growth analysis outputs.
@@ -40,7 +47,8 @@ Analysis Result:
 {analysis}
 
 Respond with ONLY a JSON object:
-{{"completeness": 0.0-1.0, "actionability": 0.0-1.0, "data_grounding": 0.0-1.0, "overall": 0.0-1.0, "reasoning": "brief feedback"}}
+{{"completeness": 0.0-1.0, "actionability": 0.0-1.0, "data_grounding": 0.0-1.0,
+"overall": 0.0-1.0, "reasoning": "brief feedback"}}
 
 Be strict but fair. Most good analyses score 0.7-0.9. Only truly exceptional ones score above 0.9.
 If the analysis is clearly incomplete or lacks substance, score below 0.6.
@@ -55,7 +63,7 @@ async def evaluate_expert_output(
     tier: str = "fast",
 ) -> QualityScore:
     """Evaluate a single expert's output quality using LLM-as-judge."""
-    llm = create_llm(tier=tier)
+    llm = create_resilient_llm(tier=tier, agent_name="evaluator")
     prompt = EVAL_PROMPT.format(
         expert_name=expert_name,
         query=query,

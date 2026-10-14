@@ -96,11 +96,16 @@ class UserSegmentor:
         df["rfm_segment"] = df["rfm_score"].apply(self._classify_rfm)
 
         result_cols = [
-            "user_id", "recency_days",
-            "recency_score", "recency_label",
-            "frequency_score", "frequency_label",
-            "monetary_score", "monetary_label",
-            "rfm_score", "rfm_segment",
+            "user_id",
+            "recency_days",
+            "recency_score",
+            "recency_label",
+            "frequency_score",
+            "frequency_label",
+            "monetary_score",
+            "monetary_label",
+            "rfm_score",
+            "rfm_segment",
         ]
         available = [c for c in result_cols if c in df.columns]
         return df[available]
@@ -144,9 +149,7 @@ class UserSegmentor:
         stages[is_active] = "active"
 
         # Loyal: heavy users (>8 rides in 30d or >20 in 90d)
-        is_loyal = (~is_new) & (
-            (df["ride_count_30d"] >= 8) | (df["ride_count_90d"] >= 20)
-        )
+        is_loyal = (~is_new) & ((df["ride_count_30d"] >= 8) | (df["ride_count_90d"] >= 20))
         stages[is_loyal] = "loyal"
 
         # At-risk: not new, some activity but declining (last ride 14-60 days ago)

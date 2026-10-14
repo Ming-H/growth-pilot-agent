@@ -1,9 +1,8 @@
 """Tests for password hashing and JWT token handling."""
+
 from __future__ import annotations
 
 from datetime import timedelta
-
-import pytest
 
 from src.auth.jwt import create_access_token, decode_access_token
 from src.auth.security import hash_password, verify_password
@@ -59,9 +58,7 @@ class TestJWTTokens:
 
     def test_jwt_expired(self):
         """A token with a past expiration decodes to None."""
-        token = create_access_token(
-            {"sub": "user-123"}, expires_delta=timedelta(seconds=-1)
-        )
+        token = create_access_token({"sub": "user-123"}, expires_delta=timedelta(seconds=-1))
         payload = decode_access_token(token)
         assert payload is None
 
@@ -80,20 +77,20 @@ class TestJWTTokens:
 
     def test_jwt_custom_claims(self):
         """Custom claims like role are preserved in the token."""
-        token = create_access_token({
-            "sub": "user-abc",
-            "org_id": "org-def",
-            "role": "owner",
-        })
+        token = create_access_token(
+            {
+                "sub": "user-abc",
+                "org_id": "org-def",
+                "role": "owner",
+            }
+        )
         payload = decode_access_token(token)
         assert payload is not None
         assert payload["role"] == "owner"
 
     def test_jwt_custom_expiry(self):
         """A custom expiry delta is respected."""
-        token = create_access_token(
-            {"sub": "user-123"}, expires_delta=timedelta(hours=1)
-        )
+        token = create_access_token({"sub": "user-123"}, expires_delta=timedelta(hours=1))
         payload = decode_access_token(token)
         assert payload is not None
         assert payload["sub"] == "user-123"

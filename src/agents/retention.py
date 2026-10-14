@@ -25,6 +25,7 @@ try:
     from src.tools.retention import ChurnPredictor, CohortAnalyzer, NurturePlanner, WinbackPlanner
 except ImportError as _import_err:
     import logging as _logging
+
     _logging.getLogger(__name__).warning("Tool import failed, using stubs: %s", _import_err)
 
     class _Stub:
@@ -38,6 +39,7 @@ except ImportError as _import_err:
                 raise RuntimeError(
                     f"Stub tool: {name}() called but tool is not available (import failed)"
                 )
+
             return _stub_method
 
     NurturePlanner = ChurnPredictor = WinbackPlanner = CohortAnalyzer = _Stub  # type: ignore[assignment,misc]
@@ -75,11 +77,22 @@ class RetentionExpert(ExpertAgentBase):
     @staticmethod
     def can_handle(query: str) -> float:
         """Return confidence score (0-1) for handling this query."""
-        return ExpertAgentBase._keyword_confidence(query, [
-            "留存", "流失", "召回", "挽回", "群组",
-            "cohort", "churn", "retention", "nurture", "winback",
-            "复购",
-        ])
+        return ExpertAgentBase._keyword_confidence(
+            query,
+            [
+                "留存",
+                "流失",
+                "召回",
+                "挽回",
+                "群组",
+                "cohort",
+                "churn",
+                "retention",
+                "nurture",
+                "winback",
+                "复购",
+            ],
+        )
 
     # ------------------------------------------------------------------
     # Main pipeline
@@ -106,7 +119,9 @@ class RetentionExpert(ExpertAgentBase):
 
         train_metrics = self._safe_execute(
             lambda: churn_predictor.train(X, y),
-            "ChurnPredictor", errors, default=None,
+            "ChurnPredictor",
+            errors,
+            default=None,
         )
         if train_metrics is not None:
             logger.info(
@@ -118,7 +133,9 @@ class RetentionExpert(ExpertAgentBase):
             # Predict churn risk
             churn_probs = self._safe_execute(
                 lambda: churn_predictor.predict_churn_risk(X),
-                "ChurnPredictor", errors, default=None,
+                "ChurnPredictor",
+                errors,
+                default=None,
             )
 
             if churn_probs is not None:
@@ -130,7 +147,9 @@ class RetentionExpert(ExpertAgentBase):
                         churn_scores=churn_probs,
                         user_features=user_features,
                     ),
-                    "ChurnPredictor", errors, default={},
+                    "ChurnPredictor",
+                    errors,
+                    default={},
                 )
 
             # Extract summary info
@@ -146,15 +165,21 @@ class RetentionExpert(ExpertAgentBase):
             high_risk_info = churn_segments.get("high_risk", {})
             n_high = min(high_risk_info.get("count", 0), 5)
             high_risk_users = [
-                {"user_id": f"high_risk_{i}", "risk_score": 0.85 - i * 0.02}
-                for i in range(n_high)
+                {"user_id": f"high_risk_{i}", "risk_score": 0.85 - i * 0.02} for i in range(n_high)
             ]
 
             # Top churn factors from feature importance
             fi = train_metrics.get("feature_importance", {})
-            churn_factors = sorted(fi, key=fi.get, reverse=True)[:5] if fi else [
-                "低活跃度", "无近30天订单", "价格敏感型用户", "竞品使用迹象",
-            ]
+            churn_factors = (
+                sorted(fi, key=fi.get, reverse=True)[:5]
+                if fi
+                else [
+                    "低活跃度",
+                    "无近30天订单",
+                    "价格敏感型用户",
+                    "竞品使用迹象",
+                ]
+            )
         else:
             churn_risk = {
                 "high_risk_ratio": 0.12,
@@ -175,7 +200,9 @@ class RetentionExpert(ExpertAgentBase):
                 cohort_dim="signup_date",
                 period="W",
             ),
-            "CohortAnalyzer", errors, default=None,
+            "CohortAnalyzer",
+            errors,
+            default=None,
         )
         if matrix is not None and not matrix.empty:
             # Convert matrix to serialisable dict
@@ -191,17 +218,17 @@ class RetentionExpert(ExpertAgentBase):
                     lambda: cohort_analyzer.find_retention_inflection(
                         retention_curve=first_cohort,
                     ),
-                    "CohortAnalyzer", errors, default={},
+                    "CohortAnalyzer",
+                    errors,
+                    default={},
                 )
                 retention_curve = {
-                    f"week_{i}": round(float(v), 4)
-                    for i, v in enumerate(first_cohort)
+                    f"week_{i}": round(float(v), 4) for i, v in enumerate(first_cohort)
                 }
                 inf_type = inflection_result.get("inflection_type", "unknown")
                 inf_period = inflection_result.get("inflection_period")
                 cohort_insight = (
-                    f"首个群组留存分析：拐点出现在第 {inf_period} 周 "
-                    f"(类型: {inf_type})"
+                    f"首个群组留存分析：拐点出现在第 {inf_period} 周 (类型: {inf_type})"
                 )
             else:
                 cohort_insight = "数据不足以进行拐点分析"
@@ -220,16 +247,23 @@ class RetentionExpert(ExpertAgentBase):
                 new_user_data=None,
                 retention_curves=retention_curve if retention_curve else None,
             ),
-            "NurturePlanner", errors, default=None,
+            "NurturePlanner",
+            errors,
+            default=None,
         )
         if nurture_plans is not None:
             # Evaluate nurture progress if cohort data has the right columns
-            if "days_since_signup" in retention_data.columns and "is_active" in retention_data.columns:
+            if (
+                "days_since_signup" in retention_data.columns
+                and "is_active" in retention_data.columns
+            ):
                 nurture_progress = self._safe_execute(
                     lambda: nurture_planner.evaluate_nurture_progress(
                         cohort_data=retention_data,
                     ),
-                    "NurturePlanner", errors, default={},
+                    "NurturePlanner",
+                    errors,
+                    default={},
                 )
             else:
                 nurture_progress = {
@@ -245,13 +279,17 @@ class RetentionExpert(ExpertAgentBase):
         winback_priority: list[str] = []
         winback_plans = self._safe_execute(
             lambda: winback_planner.generate_winback_plan(
-                churn_segments=churn_segments if churn_segments else {
+                churn_segments=churn_segments
+                if churn_segments
+                else {
                     "high_risk": {"count": 100},
                     "medium_risk": {"count": 200},
                 },
                 historical_winback_data=None,
             ),
-            "WinbackPlanner", errors, default=None,
+            "WinbackPlanner",
+            errors,
+            default=None,
         )
         if winback_plans is not None:
             wb_summary = winback_plans.get("summary", {})
@@ -276,6 +314,10 @@ class RetentionExpert(ExpertAgentBase):
             "nurture_progress": nurture_progress,
             "winback_plans": winback_plans,
             "winback_priority": winback_priority,
+            "kpis": {
+                "churn_high_risk_ratio": float(churn_risk.get("high_risk_ratio", 0) or 0),
+                "churn_model_auc": float(churn_risk.get("train_auc", 0) or 0),
+            },
             "errors": errors,
         }
 
@@ -285,13 +327,21 @@ class RetentionExpert(ExpertAgentBase):
 
     def _build_synthesis_prompt(self, params: dict, results: dict) -> str:
         """Build the LLM synthesis prompt from pipeline results."""
-        nurture_progress = str(results.get("nurture_progress", "")) if results.get("nurture_progress") else ""
+        nurture_progress = (
+            str(results.get("nurture_progress", "")) if results.get("nurture_progress") else ""
+        )
         churn_risk = results.get("churn_risk", {})
         churn_risk_summary = str(churn_risk) if churn_risk else ""
         high_risk_count = len(results.get("high_risk_users", []))
-        churn_factors = str(results.get("churn_factors", "")) if results.get("churn_factors") else ""
-        winback_plans = str(results.get("winback_plans", "")) if results.get("winback_plans") else ""
-        winback_priority = str(results.get("winback_priority", "")) if results.get("winback_priority") else ""
+        churn_factors = (
+            str(results.get("churn_factors", "")) if results.get("churn_factors") else ""
+        )
+        winback_plans = (
+            str(results.get("winback_plans", "")) if results.get("winback_plans") else ""
+        )
+        winback_priority = (
+            str(results.get("winback_priority", "")) if results.get("winback_priority") else ""
+        )
         cohort_insight = results.get("cohort_insight", "")
 
         return RetentionPrompt().render(
@@ -340,13 +390,15 @@ class RetentionExpert(ExpertAgentBase):
             idx = users.index(uid)
             signup = signup_dates[idx]
             order_date = signup + pd.Timedelta(days=int(rng.exponential(15)))
-            rows.append({
-                "user_id": uid,
-                "signup_date": signup,
-                "order_date": order_date,
-                "is_active": rng.random() > 0.3,
-                "days_since_signup": int((order_date - signup).days),
-            })
+            rows.append(
+                {
+                    "user_id": uid,
+                    "signup_date": signup,
+                    "order_date": order_date,
+                    "is_active": rng.random() > 0.3,
+                    "days_since_signup": int((order_date - signup).days),
+                }
+            )
         return pd.DataFrame(rows)
 
     @staticmethod

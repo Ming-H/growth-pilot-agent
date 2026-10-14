@@ -3,6 +3,7 @@
 Note: OrchestratorPrompt was removed when the old OrchestratorAgent
 was replaced by GrowthPilotAgent (Chief Agent) in the new architecture.
 """
+
 from src.prompts.templates.agent_prompts import (
     AdPrompt,
     ConversionPrompt,

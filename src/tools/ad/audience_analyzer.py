@@ -97,7 +97,9 @@ class AudienceAnalyzer:
 
         # --- Behavioral summary ---
         all_orders = [u.get("historical_orders", 0) for u in audience_data]
-        all_aov = [u.get("avg_order_value", 0) for u in audience_data if u.get("avg_order_value", 0) > 0]
+        all_aov = [
+            u.get("avg_order_value", 0) for u in audience_data if u.get("avg_order_value", 0) > 0
+        ]
         all_ltvs = [u.get("ltv", 0) for u in audience_data]
         all_recency = [u.get("days_since_last_order", 30) for u in audience_data]
 
@@ -140,7 +142,14 @@ class AudienceAnalyzer:
         if not seed_users or not all_users:
             return []
 
-        feature_keys = ["age", "historical_orders", "avg_order_value", "days_since_last_order", "ltv", "city_tier"]
+        feature_keys = [
+            "age",
+            "historical_orders",
+            "avg_order_value",
+            "days_since_last_order",
+            "ltv",
+            "city_tier",
+        ]
 
         # Build seed centroid
         seed_vectors = np.array([self._user_to_vector(u, feature_keys) for u in seed_users])

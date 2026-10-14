@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 try:
     import pulp
+
     HAS_PULP = True
 except ImportError:
     HAS_PULP = False
@@ -111,16 +112,12 @@ class BudgetOptimizer:
 
         results: list[dict[str, Any]] = []
         for budget in budgets:
-            plan = self.optimize_allocation(
-                user_segments, causal_effects, float(budget)
-            )
+            plan = self.optimize_allocation(user_segments, causal_effects, float(budget))
             if "error" not in plan:
                 results.append(
                     {
                         "budget": round(float(budget), 2),
-                        "expected_incremental_orders": plan.get(
-                            "expected_incremental_orders", 0
-                        ),
+                        "expected_incremental_orders": plan.get("expected_incremental_orders", 0),
                         "total_cost": plan.get("total_budget_used", 0),
                         "segments_served": plan.get("segments_served", 0),
                         "efficiency": round(
@@ -146,9 +143,7 @@ class BudgetOptimizer:
             "sensitivity_results": results,
             "best_efficiency_budget": best_efficiency,
             "has_diminishing_returns": has_diminishing,
-            "budget_step": round(
-                float(budgets[1] - budgets[0]) if len(budgets) > 1 else 0, 2
-            ),
+            "budget_step": round(float(budgets[1] - budgets[0]) if len(budgets) > 1 else 0, 2),
         }
 
     # ------------------------------------------------------------------

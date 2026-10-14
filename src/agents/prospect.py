@@ -21,6 +21,7 @@ try:
     from src.tools.prospect.user_scorer import UserScorer
 except ImportError as _import_err:
     import logging as _logging
+
     _logging.getLogger(__name__).warning("Tool import failed, using stubs: %s", _import_err)
 
     class _Stub:
@@ -34,6 +35,7 @@ except ImportError as _import_err:
                 raise RuntimeError(
                     f"Stub tool: {name}() called but tool is not available (import failed)"
                 )
+
             return _stub_method
 
     FeatureEngine = IntentModel = UserScorer = UserSegmentor = LTVPredictor = _Stub
@@ -108,7 +110,9 @@ class ProspectExpert(ExpertAgentBase):
         raw_data = self._load_data(data_path)
         features = self._safe_execute(
             lambda: feature_engine.build_feature_matrix(raw_data),
-            "FeatureEngine", errors, default=None,
+            "FeatureEngine",
+            errors,
+            default=None,
         )
         user_count = len(features) if features is not None else 0
 
@@ -118,16 +122,34 @@ class ProspectExpert(ExpertAgentBase):
         if features is not None and user_count > 0:
             import numpy as np
 
+            # Synthesize labels CORRELATED with the features so demo metrics
+            # are meaningful: a linear score of the numeric features drives a
+            # sigmoid response (~8% base rate) and labels are drawn
+            # Bernoulli — signal + irreducible noise, so a good model reaches
+            # a realistically bounded AUC instead of a meaningless one
+            # (random labels would force AUC ≈ 0.5 by construction).
             rng = np.random.RandomState(42)
-            synthetic_labels = (rng.rand(user_count) < 0.08).astype(int)
+            numeric = features.select_dtypes(include=[np.number]).fillna(0)
+            if not numeric.empty:
+                w = rng.normal(0, 1.0, size=numeric.shape[1])
+                logits = numeric.values @ w
+                z = (logits - logits.mean()) / (logits.std() + 1e-9)
+                p_intent = 1.0 / (1.0 + np.exp(-(1.5 * z - 2.5)))
+                synthetic_labels = rng.binomial(1, p_intent)
+            else:
+                synthetic_labels = (rng.rand(user_count) < 0.08).astype(int)
             intent_metrics = self._safe_execute(
                 lambda: intent_model.train(features, synthetic_labels),
-                "IntentModel", errors, default={},
+                "IntentModel",
+                errors,
+                default={},
             )
             if intent_metrics:
                 intent_scores = self._safe_execute(
                     lambda: intent_model.predict(features),
-                    "IntentModel", errors, default=None,
+                    "IntentModel",
+                    errors,
+                    default=None,
                 )
 
         # 3. Predict LTV
@@ -135,17 +157,30 @@ class ProspectExpert(ExpertAgentBase):
         if features is not None and user_count > 0:
             import numpy as np
 
-            # Train LTV model with synthetic targets if needed
+            # Synthetic LTV targets also driven by the same feature signal
+            # (log-scale), plus multiplicative noise — heavy-tailed like real
+            # monetary values but correlated with user quality.
             rng = np.random.RandomState(42)
-            synthetic_ltv = rng.exponential(scale=200, size=user_count)
+            numeric = features.select_dtypes(include=[np.number]).fillna(0)
+            if not numeric.empty:
+                w = rng.normal(0, 1.0, size=numeric.shape[1])
+                logits = numeric.values @ w
+                z = (logits - logits.mean()) / (logits.std() + 1e-9)
+                synthetic_ltv = np.exp(0.2 * z + rng.normal(0, 0.3, size=user_count)) * 200
+            else:
+                synthetic_ltv = rng.exponential(scale=200, size=user_count)
             train_ok = self._safe_execute(
                 lambda: ltv_predictor.train(features, synthetic_ltv),
-                "LTVPredictor", errors, default=None,
+                "LTVPredictor",
+                errors,
+                default=None,
             )
             if train_ok is not None:
                 ltv_predictions = self._safe_execute(
                     lambda: ltv_predictor.predict_ltv(features),
-                    "LTVPredictor", errors, default=None,
+                    "LTVPredictor",
+                    errors,
+                    default=None,
                 )
 
         # 4. Score users
@@ -158,12 +193,16 @@ class ProspectExpert(ExpertAgentBase):
                     ltv_predictions=ltv_predictions.values,
                     user_ids=features.index if features is not None else None,
                 ),
-                "UserScorer", errors, default=None,
+                "UserScorer",
+                errors,
+                default=None,
             )
             if user_scores_df is not None:
                 ranked = self._safe_execute(
                     lambda: scorer.rank_users(user_scores_df),
-                    "UserScorer", errors, default=None,
+                    "UserScorer",
+                    errors,
+                    default=None,
                 )
                 top_users = ranked.head(100).to_dict("records") if ranked is not None else []
 
@@ -173,7 +212,9 @@ class ProspectExpert(ExpertAgentBase):
         if user_scores_df is not None:
             segments = self._safe_execute(
                 lambda: scorer.segment_by_score(user_scores_df),
-                "UserSegmentor", errors, default={},
+                "UserSegmentor",
+                errors,
+                default={},
             )
             segment_summary = {
                 name: {
@@ -201,7 +242,9 @@ class ProspectExpert(ExpertAgentBase):
             if len(user_data) > 0:
                 rfm_result = self._safe_execute(
                     lambda: segmentor.combined_segmentation(user_data).to_dict("index"),
-                    "RFMSegmentation", errors, default={},
+                    "RFMSegmentation",
+                    errors,
+                    default={},
                 )
 
         # Build flat result dict (no wrapping in {"prospect_results": ...})
@@ -211,6 +254,10 @@ class ProspectExpert(ExpertAgentBase):
             "segment_summary": segment_summary,
             "rfm_result_count": len(rfm_result),
             "top_users_sample": top_users[:10] if top_users else [],
+            "kpis": {
+                "total_users": float(user_count),
+                "intent_auc": float(intent_metrics.get("auc", 0) or 0) if intent_metrics else 0.0,
+            },
         }
         if errors:
             result["errors"] = errors

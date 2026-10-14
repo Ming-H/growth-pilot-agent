@@ -16,8 +16,8 @@ from src.tools.registry import ToolRegistry
 logger = logging.getLogger(__name__)
 
 # Coupon type constants
-COUPON_TYPE_DISCOUNT = "折扣券"     # percentage discount
-COUPON_TYPE_THRESHOLD = "满减券"    # fixed amount off with minimum spend
+COUPON_TYPE_DISCOUNT = "折扣券"  # percentage discount
+COUPON_TYPE_THRESHOLD = "满减券"  # fixed amount off with minimum spend
 
 # Default segment parameters (can be overridden)
 SEGMENT_DEFAULTS: dict[str, dict[str, Any]] = {
@@ -82,9 +82,7 @@ class CouponDesigner:
         Returns:
             Dict with coupon_type, amount, threshold, and estimated rates.
         """
-        seg_defaults = SEGMENT_DEFAULTS.get(
-            user_segment, SEGMENT_DEFAULTS["moderate"]
-        )
+        seg_defaults = SEGMENT_DEFAULTS.get(user_segment, SEGMENT_DEFAULTS["moderate"])
 
         # Analyse historical data if provided
         hist_analysis = self._analyse_history(historical_coupon_data, user_segment)
@@ -113,12 +111,8 @@ class CouponDesigner:
         coupon["coupon_type"] = coupon_type
 
         # Estimate claim and redemption rates
-        claim_rate = self._estimate_claim_rate(
-            coupon, affinity, hist_analysis
-        )
-        redemption_rate = self._estimate_redemption_rate(
-            coupon, sensitivity, hist_analysis
-        )
+        claim_rate = self._estimate_claim_rate(coupon, affinity, hist_analysis)
+        redemption_rate = self._estimate_redemption_rate(coupon, sensitivity, hist_analysis)
 
         coupon["estimated_claim_rate"] = round(claim_rate, 4)
         coupon["estimated_redemption_rate"] = round(redemption_rate, 4)
@@ -193,9 +187,7 @@ class CouponDesigner:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _analyse_history(
-        self, data: Any, segment: str
-    ) -> dict[str, Any] | None:
+    def _analyse_history(self, data: Any, segment: str) -> dict[str, Any] | None:
         """Analyse historical coupon performance."""
         if data is None:
             return None
@@ -224,9 +216,7 @@ class CouponDesigner:
 
         return result
 
-    def _summarise_history(
-        self, data: Any, coupon_type: str
-    ) -> dict[str, Any]:
+    def _summarise_history(self, data: Any, coupon_type: str) -> dict[str, Any]:
         """Summarise historical data for a specific coupon type."""
         result: dict[str, Any] = {
             "has_data": False,

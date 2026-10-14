@@ -1,9 +1,9 @@
 """Tests for ad tools: RTAStrategy, BidOptimizer, CreativeAnalyzer, AudienceAnalyzer."""
+
 from __future__ import annotations
 
 import numpy as np
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # RTAStrategy
@@ -16,6 +16,7 @@ class TestRTAStrategy:
     @pytest.fixture
     def strategy(self):
         from src.tools.ad.rta_strategy import RTAStrategy
+
         return RTAStrategy()
 
     @pytest.fixture
@@ -42,34 +43,48 @@ class TestRTAStrategy:
 
     def test_should_bid_returns_tuple(self, strategy, sample_user_features, sample_prospect_scores):
         result = strategy.should_bid(
-            sample_user_features, sample_prospect_scores,
-            bid_floor=0.5, target_cpa=50.0,
+            sample_user_features,
+            sample_prospect_scores,
+            bid_floor=0.5,
+            target_cpa=50.0,
         )
         assert isinstance(result, tuple)
         assert len(result) == 2
         assert isinstance(result[0], bool)
         assert isinstance(result[1], float)
 
-    def test_should_bid_zero_bid_floor(self, strategy, sample_user_features, sample_prospect_scores):
+    def test_should_bid_zero_bid_floor(
+        self, strategy, sample_user_features, sample_prospect_scores
+    ):
         should, price = strategy.should_bid(
-            sample_user_features, sample_prospect_scores,
-            bid_floor=0, target_cpa=50.0,
+            sample_user_features,
+            sample_prospect_scores,
+            bid_floor=0,
+            target_cpa=50.0,
         )
         assert should is False
         assert price == 0.0
 
-    def test_should_bid_zero_target_cpa(self, strategy, sample_user_features, sample_prospect_scores):
+    def test_should_bid_zero_target_cpa(
+        self, strategy, sample_user_features, sample_prospect_scores
+    ):
         should, price = strategy.should_bid(
-            sample_user_features, sample_prospect_scores,
-            bid_floor=0.5, target_cpa=0,
+            sample_user_features,
+            sample_prospect_scores,
+            bid_floor=0.5,
+            target_cpa=0,
         )
         assert should is False
 
-    def test_should_bid_high_floor_may_reject(self, strategy, sample_user_features, sample_prospect_scores):
+    def test_should_bid_high_floor_may_reject(
+        self, strategy, sample_user_features, sample_prospect_scores
+    ):
         # Very high floor should be rejected
         should, price = strategy.should_bid(
-            sample_user_features, sample_prospect_scores,
-            bid_floor=10000.0, target_cpa=5.0,
+            sample_user_features,
+            sample_prospect_scores,
+            bid_floor=10000.0,
+            target_cpa=5.0,
         )
         assert should is False
 
@@ -102,15 +117,14 @@ class TestBidOptimizer:
     @pytest.fixture
     def optimizer(self):
         from src.tools.ad.bid_optimizer import BidOptimizer
+
         return BidOptimizer()
 
     def test_instantiate(self, optimizer):
         assert optimizer is not None
 
     def test_ecpc_bid_returns_float(self, optimizer):
-        bid = optimizer.ecpc_bid(
-            current_bid=2.0, cvr=0.05, target_cpa=50.0, alpha=0.5
-        )
+        bid = optimizer.ecpc_bid(current_bid=2.0, cvr=0.05, target_cpa=50.0, alpha=0.5)
         assert isinstance(bid, float)
         assert bid > 0
 
@@ -127,9 +141,7 @@ class TestBidOptimizer:
         assert bid == 0.0
 
     def test_ecpc_bid_reasonable_range(self, optimizer):
-        bid = optimizer.ecpc_bid(
-            current_bid=2.0, cvr=0.05, target_cpa=40.0, alpha=1.0
-        )
+        bid = optimizer.ecpc_bid(current_bid=2.0, cvr=0.05, target_cpa=40.0, alpha=1.0)
         # bid should be formulaic: 2.0 * 0.05 / 40.0 = 0.0025, clamped to 0.01
         assert bid >= 0.01
 
@@ -158,8 +170,10 @@ class TestBidOptimizer:
             "cvr_values": [0.02, 0.03, 0.04, 0.045, 0.047, 0.048],
         }
         result = optimizer.bid_simulation(
-            budget=10000, base_bid=2.0,
-            ctr_curve=ctr_curve, cvr_curve=cvr_curve,
+            budget=10000,
+            base_bid=2.0,
+            ctr_curve=ctr_curve,
+            cvr_curve=cvr_curve,
         )
         assert isinstance(result, dict)
         assert "bid_levels" in result
@@ -185,14 +199,36 @@ class TestCreativeAnalyzer:
     @pytest.fixture
     def analyzer(self):
         from src.tools.ad.creative_analyzer import CreativeAnalyzer
+
         return CreativeAnalyzer()
 
     @pytest.fixture
     def sample_creative_data(self):
         return [
-            {"creative_id": "c1", "impressions": 10000, "clicks": 500, "conversions": 25, "spend": 200, "revenue": 1000},
-            {"creative_id": "c2", "impressions": 8000, "clicks": 200, "conversions": 10, "spend": 150, "revenue": 400},
-            {"creative_id": "c3", "impressions": 5000, "clicks": 300, "conversions": 20, "spend": 120, "revenue": 800},
+            {
+                "creative_id": "c1",
+                "impressions": 10000,
+                "clicks": 500,
+                "conversions": 25,
+                "spend": 200,
+                "revenue": 1000,
+            },
+            {
+                "creative_id": "c2",
+                "impressions": 8000,
+                "clicks": 200,
+                "conversions": 10,
+                "spend": 150,
+                "revenue": 400,
+            },
+            {
+                "creative_id": "c3",
+                "impressions": 5000,
+                "clicks": 300,
+                "conversions": 20,
+                "spend": 120,
+                "revenue": 800,
+            },
         ]
 
     def test_instantiate(self, analyzer):
@@ -249,6 +285,7 @@ class TestAudienceAnalyzer:
     @pytest.fixture
     def analyzer(self):
         from src.tools.ad.audience_analyzer import AudienceAnalyzer
+
         return AudienceAnalyzer()
 
     @pytest.fixture

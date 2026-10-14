@@ -54,19 +54,21 @@ class CreativeAnalyzer:
             cpa = spend / conversions if conversions > 0 else 0.0
             roi = revenue / spend if spend > 0 else 0.0
 
-            creative_metrics.append({
-                "creative_id": c.get("creative_id", "unknown"),
-                "impressions": impressions,
-                "clicks": clicks,
-                "conversions": conversions,
-                "spend": round(spend, 2),
-                "revenue": round(revenue, 2),
-                "ctr": round(ctr, 4),
-                "cvr": round(cvr, 4),
-                "cpc": round(cpc, 2),
-                "cpa": round(cpa, 2),
-                "roi": round(roi, 4),
-            })
+            creative_metrics.append(
+                {
+                    "creative_id": c.get("creative_id", "unknown"),
+                    "impressions": impressions,
+                    "clicks": clicks,
+                    "conversions": conversions,
+                    "spend": round(spend, 2),
+                    "revenue": round(revenue, 2),
+                    "ctr": round(ctr, 4),
+                    "cvr": round(cvr, 4),
+                    "cpc": round(cpc, 2),
+                    "cpa": round(cpa, 2),
+                    "roi": round(roi, 4),
+                }
+            )
 
         # Sort by ROI descending
         creative_metrics.sort(key=lambda x: x["roi"], reverse=True)

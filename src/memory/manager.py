@@ -12,6 +12,7 @@ not available, ensuring the application always starts.
 Reference: claude-cookbooks MemoryToolHandler (filesystem persistence)
            + ai-app-lab longterm_memory (extract-store-retrieve-inject)
 """
+
 from __future__ import annotations
 
 import json
@@ -39,6 +40,7 @@ def _tokenize(text: str) -> list[str]:
     tokens: list[str] = []
     try:
         import jieba
+
         zh_chars = _ZH_CHAR.findall(text)
         if zh_chars:
             tokens.extend(jieba.cut("".join(zh_chars)))
@@ -54,14 +56,75 @@ def _tokenize(text: str) -> list[str]:
 
 _STOP_WORDS: frozenset[str] = frozenset(
     # English
-    {"the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-     "in", "on", "at", "to", "for", "of", "with", "by", "from", "and",
-     "or", "but", "not", "no", "this", "that", "it", "its", "has", "have",
-     "had", "do", "does", "did", "will", "would", "can", "could",
-     # Chinese common particles
-     "的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都",
-     "一", "一个", "上", "也", "很", "到", "说", "要", "去", "你",
-     "会", "着", "没有", "看", "好", "自己", "这"}
+    {
+        "the",
+        "a",
+        "an",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "with",
+        "by",
+        "from",
+        "and",
+        "or",
+        "but",
+        "not",
+        "no",
+        "this",
+        "that",
+        "it",
+        "its",
+        "has",
+        "have",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "can",
+        "could",
+        # Chinese common particles
+        "的",
+        "了",
+        "在",
+        "是",
+        "我",
+        "有",
+        "和",
+        "就",
+        "不",
+        "人",
+        "都",
+        "一",
+        "一个",
+        "上",
+        "也",
+        "很",
+        "到",
+        "说",
+        "要",
+        "去",
+        "你",
+        "会",
+        "着",
+        "没有",
+        "看",
+        "好",
+        "自己",
+        "这",
+    }
 )
 
 
@@ -73,6 +136,7 @@ def _filter_tokens(tokens: list[str]) -> list[str]:
 # ---------------------------------------------------------------------------
 # TF-IDF computation (fallback mode)
 # ---------------------------------------------------------------------------
+
 
 def _compute_tf(tokens: list[str]) -> dict[str, float]:
     """Compute term frequency for a token list."""
@@ -96,10 +160,7 @@ def _compute_idf(doc_tokens_list: list[list[str]]) -> dict[str, float]:
             doc_freq[term] += 1
 
     # Smooth IDF: log((1 + N) / (1 + df)) + 1
-    return {
-        term: math.log((1 + n_docs) / (1 + df)) + 1
-        for term, df in doc_freq.items()
-    }
+    return {term: math.log((1 + n_docs) / (1 + df)) + 1 for term, df in doc_freq.items()}
 
 
 def _tfidf_score(
@@ -137,6 +198,7 @@ def _tfidf_score(
 # ---------------------------------------------------------------------------
 # MemoryManager
 # ---------------------------------------------------------------------------
+
 
 class MemoryManager:
     """Persistent memory manager with vector semantic search.
@@ -313,7 +375,10 @@ class MemoryManager:
 
         logger.info(
             "Memory stored: id=%s run_id=%s scope=%s vector=%s",
-            entry_id, run_id, scope, self._use_vector,
+            entry_id,
+            run_id,
+            scope,
+            self._use_vector,
         )
         return entry_id
 
@@ -400,12 +465,14 @@ class MemoryManager:
             # Try to find the matching local entry for richer data
             local_entry = self._find_local_entry(meta, content)
 
-            enriched.append({
-                **local_entry,
-                "content": content,
-                "_relevance_score": round(final_score, 4),
-                "_source": "vector",
-            })
+            enriched.append(
+                {
+                    **local_entry,
+                    "content": content,
+                    "_relevance_score": round(final_score, 4),
+                    "_source": "vector",
+                }
+            )
 
         enriched.sort(key=lambda x: x["_relevance_score"], reverse=True)
         return enriched[:limit]
@@ -470,9 +537,7 @@ class MemoryManager:
 
         # Filter zero-score entries
         results = [
-            {**entry, "_relevance_score": round(score, 4)}
-            for score, entry in scored
-            if score > 0
+            {**entry, "_relevance_score": round(score, 4)} for score, entry in scored if score > 0
         ]
 
         return results[:limit]
@@ -536,6 +601,7 @@ class MemoryManager:
             # Format timestamp
             if ts:
                 from datetime import datetime
+
                 time_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
             else:
                 time_str = "未知时间"

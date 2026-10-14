@@ -1,10 +1,10 @@
 """Tests for retention tools: ChurnPredictor, CohortAnalyzer, NurturePlanner, WinbackPlanner."""
+
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # ChurnPredictor
@@ -17,6 +17,7 @@ class TestChurnPredictor:
     @pytest.fixture
     def predictor(self):
         from src.tools.retention.churn_predictor import ChurnPredictor
+
         return ChurnPredictor(n_estimators=10, cv_folds=2)
 
     @pytest.fixture
@@ -69,6 +70,7 @@ class TestCohortAnalyzer:
     @pytest.fixture
     def analyzer(self):
         from src.tools.retention.cohort_analyzer import CohortAnalyzer
+
         return CohortAnalyzer(observation_window=60)
 
     @pytest.fixture
@@ -81,11 +83,13 @@ class TestCohortAnalyzer:
             n_orders = np.random.randint(1, 6)
             for _ in range(n_orders):
                 order_date = signup + pd.Timedelta(days=np.random.randint(0, 45))
-                rows.append({
-                    "user_id": uid,
-                    "order_date": order_date,
-                    "signup_date": signup,
-                })
+                rows.append(
+                    {
+                        "user_id": uid,
+                        "order_date": order_date,
+                        "signup_date": signup,
+                    }
+                )
         return pd.DataFrame(rows)
 
     def test_instantiate(self, analyzer):
@@ -105,7 +109,11 @@ class TestCohortAnalyzer:
         curve = np.array([1.0, 0.8, 0.65, 0.55, 0.50, 0.48, 0.47, 0.46])
         result = analyzer.find_retention_inflection(curve)
         assert isinstance(result, dict)
-        assert "inflection_points" in result or "inflection_point" in result or isinstance(result, dict)
+        assert (
+            "inflection_points" in result
+            or "inflection_point" in result
+            or isinstance(result, dict)
+        )
 
     def test_analyze_retention_cohort_monthly(self, analyzer, sample_order_data):
         result = analyzer.analyze_retention_cohort(sample_order_data, period="M")
@@ -123,6 +131,7 @@ class TestNurturePlanner:
     @pytest.fixture
     def planner(self):
         from src.tools.retention.nurture_planner import NurturePlanner
+
         return NurturePlanner()
 
     def test_instantiate(self, planner):
@@ -152,10 +161,12 @@ class TestNurturePlanner:
         assert result["meta"]["personalisation"] == "personalised"
 
     def test_evaluate_nurture_progress(self, planner):
-        cohort_data = pd.DataFrame({
-            "days_since_signup": [1, 3, 7, 14, 30, 1, 3, 7],
-            "is_active": [True, True, True, False, False, True, True, True],
-        })
+        cohort_data = pd.DataFrame(
+            {
+                "days_since_signup": [1, 3, 7, 14, 30, 1, 3, 7],
+                "is_active": [True, True, True, False, False, True, True, True],
+            }
+        )
         result = planner.evaluate_nurture_progress(cohort_data)
         assert isinstance(result, dict)
         assert "overall_health" in result
@@ -177,6 +188,7 @@ class TestWinbackPlanner:
     @pytest.fixture
     def planner(self):
         from src.tools.retention.winback_planner import WinbackPlanner
+
         return WinbackPlanner(min_segment_size=10)
 
     @pytest.fixture
@@ -218,13 +230,17 @@ class TestWinbackPlanner:
         assert "priority_order" in summary
 
     def test_generate_winback_plan_with_historical_data(self, planner, sample_churn_segments):
-        hist_data = pd.DataFrame({
-            "segment": ["price_sensitive", "price_sensitive"],
-            "winback_rate": [0.10, 0.14],
-            "cost_per_winback": [15.0, 12.0],
-            "roi": [1.5, 2.0],
-        })
-        result = planner.generate_winback_plan(sample_churn_segments, historical_winback_data=hist_data)
+        hist_data = pd.DataFrame(
+            {
+                "segment": ["price_sensitive", "price_sensitive"],
+                "winback_rate": [0.10, 0.14],
+                "cost_per_winback": [15.0, 12.0],
+                "roi": [1.5, 2.0],
+            }
+        )
+        result = planner.generate_winback_plan(
+            sample_churn_segments, historical_winback_data=hist_data
+        )
         assert isinstance(result, dict)
         assert "summary" in result
 

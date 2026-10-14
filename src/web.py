@@ -201,9 +201,7 @@ async def register(
     await db.flush()
 
     # Generate JWT
-    token = create_access_token(
-        data={"sub": user.id, "org_id": org.id, "role": user.role}
-    )
+    token = create_access_token(data={"sub": user.id, "org_id": org.id, "role": user.role})
 
     return TokenResponse(
         access_token=token,
@@ -228,9 +226,7 @@ async def login(
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Account is disabled")
 
-    token = create_access_token(
-        data={"sub": user.id, "org_id": user.org_id, "role": user.role}
-    )
+    token = create_access_token(data={"sub": user.id, "org_id": user.org_id, "role": user.role})
 
     return TokenResponse(
         access_token=token,
@@ -354,7 +350,11 @@ async def analyze(
 
     logger.info(
         "Analyze request: id=%s user=%s org=%s query=%s scope=%s",
-        analysis.id, user.id, user.org_id, request.query, request.scope,
+        analysis.id,
+        user.id,
+        user.org_id,
+        request.query,
+        request.scope,
     )
 
     start_time = time.monotonic()
@@ -442,7 +442,10 @@ async def analyze_stream(
 
     logger.info(
         "Stream request: id=%s user=%s org=%s query=%s",
-        analysis_id, user.id, user.org_id, request.query,
+        analysis_id,
+        user.id,
+        user.org_id,
+        request.query,
     )
 
     def _sse_event(agent_event: AgentEvent) -> dict:
@@ -524,39 +527,45 @@ async def analyze_stream(
                     if kind == "on_chain_start" and name in _node_progress:
                         progress = _node_progress[name]
                         evt_type = _node_type[name]
-                        yield _sse_event(AgentEvent(
-                            type=evt_type,
-                            message=f"Starting {name}...",
-                            progress=progress,
-                            data={"node": name, "phase": "start"},
-                        ))
+                        yield _sse_event(
+                            AgentEvent(
+                                type=evt_type,
+                                message=f"Starting {name}...",
+                                progress=progress,
+                                data={"node": name, "phase": "start"},
+                            )
+                        )
                     elif kind == "on_chain_end" and name in _node_progress:
                         progress = _node_progress[name] + 0.15
                         evt_type = _node_type[name]
                         output = event.get("data", {}).get("output", {})
-                        yield _sse_event(AgentEvent(
-                            type=evt_type,
-                            message=f"Completed {name}",
-                            progress=round(min(progress, 0.95), 2),
-                            data={"node": name, "phase": "end"},
-                        ))
+                        yield _sse_event(
+                            AgentEvent(
+                                type=evt_type,
+                                message=f"Completed {name}",
+                                progress=round(min(progress, 0.95), 2),
+                                data={"node": name, "phase": "end"},
+                            )
+                        )
                         # After execute_node, emit per-expert events from state
                         if name == "execute_node" and isinstance(output, dict):
                             selected_experts = output.get("selected_experts", [])
                             expert_count = max(len(selected_experts), 1)
                             for idx, expert_name in enumerate(selected_experts):
                                 ep = 0.3 + (0.25 * ((idx + 1) / expert_count))
-                                yield _sse_event(AgentEvent(
-                                    type="execute",
-                                    expert=expert_name,
-                                    message=f"Ran {expert_name} analysis",
-                                    progress=round(ep, 2),
-                                    data={
-                                        "expert": expert_name,
-                                        "index": idx,
-                                        "total": expert_count,
-                                    },
-                                ))
+                                yield _sse_event(
+                                    AgentEvent(
+                                        type="execute",
+                                        expert=expert_name,
+                                        message=f"Ran {expert_name} analysis",
+                                        progress=round(ep, 2),
+                                        data={
+                                            "expert": expert_name,
+                                            "index": idx,
+                                            "total": expert_count,
+                                        },
+                                    )
+                                )
 
             elapsed = time.monotonic() - start_time
 
@@ -592,6 +601,7 @@ async def analyze_stream(
 
             # Update analysis record with results
             from src.db.database import get_session_factory
+
             session_factory = get_session_factory()
             async with session_factory() as update_db:
                 result_db = await update_db.execute(
@@ -642,6 +652,7 @@ async def analyze_stream(
             # Mark analysis as failed
             try:
                 from src.db.database import get_session_factory
+
                 session_factory = get_session_factory()
                 async with session_factory() as update_db:
                     result_db = await update_db.execute(
@@ -677,9 +688,7 @@ async def list_analyses(
 ) -> AnalysisListResponse:
     """List analyses for the user's organization (paginated)."""
     # Count total
-    count_q = select(func.count()).select_from(Analysis).where(
-        Analysis.org_id == user.org_id
-    )
+    count_q = select(func.count()).select_from(Analysis).where(Analysis.org_id == user.org_id)
     total = (await db.execute(count_q)).scalar() or 0
 
     # Fetch page
@@ -805,7 +814,9 @@ async def approve_analysis(
         )
         logger.info(
             "Analysis %s rejected by user %s (feedback: %s)",
-            analysis_id, user.id, body.feedback,
+            analysis_id,
+            user.id,
+            body.feedback,
         )
         return ApprovalResponse(
             analysis_id=analysis_id,
@@ -827,7 +838,8 @@ async def approve_analysis(
 
     logger.info(
         "Analysis %s approved by user %s, resuming execution",
-        analysis_id, user.id,
+        analysis_id,
+        user.id,
     )
 
     # Resume the graph from the approval checkpoint (None = continue from interrupt)
@@ -967,9 +979,7 @@ def create_app() -> FastAPI:
 
     # Exception handlers
     @application.exception_handler(AnalysisError)
-    async def analysis_error_handler(
-        request: Request, exc: AnalysisError
-    ) -> JSONResponse:
+    async def analysis_error_handler(request: Request, exc: AnalysisError) -> JSONResponse:
         """Handle AnalysisError -> 500 with structured JSON."""
         return JSONResponse(
             status_code=500,
@@ -981,9 +991,7 @@ def create_app() -> FastAPI:
         )
 
     @application.exception_handler(HTTPException)
-    async def http_exception_handler(
-        request: Request, exc: HTTPException
-    ) -> JSONResponse:
+    async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
         """Handle HTTPException with consistent JSON envelope."""
         return JSONResponse(
             status_code=exc.status_code,
@@ -995,9 +1003,7 @@ def create_app() -> FastAPI:
         )
 
     @application.exception_handler(Exception)
-    async def generic_exception_handler(
-        request: Request, exc: Exception
-    ) -> JSONResponse:
+    async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         """Catch-all handler for unhandled exceptions."""
         logger.exception("Unhandled exception: %s", exc)
         settings = get_settings()

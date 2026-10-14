@@ -1,4 +1,5 @@
 """Tests for auth API endpoints: register, login, /me."""
+
 from __future__ import annotations
 
 import os
@@ -12,7 +13,6 @@ from sqlalchemy.pool import StaticPool
 
 from src.db.database import Base, get_db
 from src.web import create_app
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -84,12 +84,15 @@ class TestRegister:
     @pytest.mark.asyncio
     async def test_register_success(self, auth_client):
         """Successful registration returns 201 with token and user info."""
-        resp = await auth_client.post("/api/v1/auth/register", json={
-            "email": _unique_email(),
-            "password": "securepass123",
-            "name": "New User",
-            "org_name": "Test Org",
-        })
+        resp = await auth_client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": _unique_email(),
+                "password": "securepass123",
+                "name": "New User",
+                "org_name": "Test Org",
+            },
+        )
         assert resp.status_code == 201
         data = resp.json()
         assert "access_token" in data
@@ -110,11 +113,14 @@ class TestRegister:
         resp1 = await auth_client.post("/api/v1/auth/register", json=payload)
         assert resp1.status_code == 201
 
-        resp2 = await auth_client.post("/api/v1/auth/register", json={
-            "email": email,
-            "password": "different456",
-            "name": "Second",
-        })
+        resp2 = await auth_client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": email,
+                "password": "different456",
+                "name": "Second",
+            },
+        )
         # 409 (conflict) from explicit check, or 500 from unhandled integrity error
         assert resp2.status_code in (409, 500)
 
@@ -132,15 +138,21 @@ class TestLogin:
         """Successful login returns token and user info."""
         email = _unique_email()
         password = "loginpass123"
-        await auth_client.post("/api/v1/auth/register", json={
-            "email": email,
-            "password": password,
-            "name": "Login User",
-        })
-        resp = await auth_client.post("/api/v1/auth/login", json={
-            "email": email,
-            "password": password,
-        })
+        await auth_client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": email,
+                "password": password,
+                "name": "Login User",
+            },
+        )
+        resp = await auth_client.post(
+            "/api/v1/auth/login",
+            json={
+                "email": email,
+                "password": password,
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert "access_token" in data
@@ -151,24 +163,33 @@ class TestLogin:
     async def test_login_wrong_password_fails(self, auth_client):
         """Login with wrong password returns 401."""
         email = _unique_email()
-        await auth_client.post("/api/v1/auth/register", json={
-            "email": email,
-            "password": "correctpass",
-            "name": "Wrong PW User",
-        })
-        resp = await auth_client.post("/api/v1/auth/login", json={
-            "email": email,
-            "password": "incorrectpass",
-        })
+        await auth_client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": email,
+                "password": "correctpass",
+                "name": "Wrong PW User",
+            },
+        )
+        resp = await auth_client.post(
+            "/api/v1/auth/login",
+            json={
+                "email": email,
+                "password": "incorrectpass",
+            },
+        )
         assert resp.status_code == 401
 
     @pytest.mark.asyncio
     async def test_login_nonexistent_user_fails(self, auth_client):
         """Login with an unregistered email returns 401."""
-        resp = await auth_client.post("/api/v1/auth/login", json={
-            "email": _unique_email(),
-            "password": "anypass",
-        })
+        resp = await auth_client.post(
+            "/api/v1/auth/login",
+            json={
+                "email": _unique_email(),
+                "password": "anypass",
+            },
+        )
         assert resp.status_code == 401
 
 
@@ -184,11 +205,14 @@ class TestMe:
     async def test_me_with_valid_token(self, auth_client):
         """Authenticated /me returns current user info."""
         email = _unique_email()
-        reg_resp = await auth_client.post("/api/v1/auth/register", json={
-            "email": email,
-            "password": "mepass123",
-            "name": "Me User",
-        })
+        reg_resp = await auth_client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": email,
+                "password": "mepass123",
+                "name": "Me User",
+            },
+        )
         token = reg_resp.json()["access_token"]
 
         resp = await auth_client.get(

@@ -10,10 +10,20 @@ class GuardrailResult:
 
 
 INJECTION_PATTERNS = [
-    r"(?i)(ignore\s+previous|forget\s+your|you\s+are\s+now|system\s*prompt)",
-    r"(?i)(pretend|act\s+as|roleplay|jailbreak)",
-    r"(?i)(<system>|</system>|```system)",
-    r"(?i)(translate.*above|summarize.*above|repeat.*above)",
+    # English: explicit instruction-override phrases only — bare words like
+    # "pretend" or "act as" false-positive on legitimate business queries.
+    r"(?i)(ignore\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?|rules?))",
+    r"(?i)(disregard\s+(your|all|the)\s+(system\s+)?(instructions?|prompts?|rules?))",
+    r"(?i)(forget\s+(everything|all)\s+(you|above))",
+    r"(?i)(you\s+are\s+now\s+(a|an)\s+(different|new|unrestricted))",
+    r"(?i)(jailbreak|DAN\s+mode|developer\s+mode\s+enabled)",
+    r"(?i)(reveal|show|print|repeat|output).{0,30}(system\s+prompt|secret\s+prompt)",
+    r"(?i)(<\|?(im_start|system)\|?>|</?system>|```system)",
+    # Chinese equivalents
+    r"忽略.{0,6}(指令|提示词?|规则|设定)",
+    r"(忽略|无视)(你的)?系统提示",
+    r"(扮演|假装成)(系统|管理员|开发者)",
+    r"(越狱|解锁开发者模式|显示你的系统提示)",
 ]
 
 

@@ -1,7 +1,8 @@
 """Tests for FastAPI authentication dependencies."""
+
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
@@ -16,10 +17,12 @@ class TestGetCurrentUser:
     @pytest.mark.asyncio
     async def test_valid_token_returns_user(self, test_user, db_session):
         """A valid JWT token returns the matching User object."""
-        token = create_access_token({
-            "sub": test_user.id,
-            "org_id": test_user.org_id,
-        })
+        token = create_access_token(
+            {
+                "sub": test_user.id,
+                "org_id": test_user.org_id,
+            }
+        )
 
         creds = MagicMock()
         creds.credentials = token
@@ -88,6 +91,7 @@ class TestRequireRole:
         """require_role returns an async function."""
         checker = require_role("admin", "owner")
         import asyncio
+
         assert asyncio.iscoroutinefunction(checker)
 
     @pytest.mark.asyncio

@@ -1,14 +1,11 @@
 """Tests for src.guardrails.output_guard - output validation and sensitive info detection."""
+
 from __future__ import annotations
 
-import pytest
-
 from src.guardrails.output_guard import (
-    OutputGuardResult,
     check_sensitive_info,
     validate_output,
 )
-
 
 # ---------------------------------------------------------------------------
 # validate_output - valid outputs
@@ -114,7 +111,9 @@ class TestCheckSensitiveInfo:
 
     def test_clean_output_passes(self):
         """Normal analysis output without sensitive data passes."""
-        output = "The conversion rate improved from 2.1% to 3.5% after implementing the new strategy."
+        output = (
+            "The conversion rate improved from 2.1% to 3.5% after implementing the new strategy."
+        )
         result = check_sensitive_info(output)
         assert result.passed is True
 

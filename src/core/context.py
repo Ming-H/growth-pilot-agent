@@ -8,6 +8,7 @@ LangChain and Anthropic for managing context in multi-agent systems.
 - **Compress**: Reduce verbose feedback into concise directives.
 - **Isolate**: Scope each expert's context independently.
 """
+
 from __future__ import annotations
 
 import logging

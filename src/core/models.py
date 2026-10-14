@@ -3,6 +3,7 @@
 These Pydantic models provide validation, serialization, and
 self-documenting contracts between agents, tools, and the orchestrator.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -10,10 +11,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 # ---------------------------------------------------------------------------
 # Base result model
 # ---------------------------------------------------------------------------
+
 
 class AgentResult(BaseModel):
     """Base class for all agent results."""
@@ -24,11 +25,15 @@ class AgentResult(BaseModel):
     errors: list[str] = Field(default_factory=list)
     agent_name: str = ""
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    # Standardised numeric KPIs surfaced by every expert; the workflow layer
+    # merges these into the top-level kpi_snapshot (single aggregation point).
+    kpis: dict[str, float] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
 # LLM analysis envelope (shared by all agents)
 # ---------------------------------------------------------------------------
+
 
 class LLMAnalysis(BaseModel):
     """Structured wrapper for LLM synthesis output."""
@@ -42,6 +47,7 @@ class LLMAnalysis(BaseModel):
 # ---------------------------------------------------------------------------
 # Expert agent results
 # ---------------------------------------------------------------------------
+
 
 class SegmentInfo(BaseModel):
     """Single user segment statistics."""
@@ -141,6 +147,7 @@ class AdResult(AgentResult):
 # ---------------------------------------------------------------------------
 # KPI Snapshot (built by report_node)
 # ---------------------------------------------------------------------------
+
 
 class KpiSnapshot(BaseModel):
     """Aggregate key metrics from all sub-agent results."""

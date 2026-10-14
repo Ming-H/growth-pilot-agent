@@ -123,9 +123,7 @@ class ReachPlanner:
                 continue
 
             # Rank channels for this segment
-            ranked = self._rank_channels_for_segment(
-                segment, count, channel_scores, blacklist
-            )
+            ranked = self._rank_channels_for_segment(segment, count, channel_scores, blacklist)
 
             if not ranked:
                 strategies[segment] = {
@@ -145,18 +143,14 @@ class ReachPlanner:
             timing = self._compute_best_timing(segment)
             creative = self._select_creative(segment)
 
-            exposure_cost = (
-                CHANNELS[primary_channel]["cost_per_exposure"] * count * freq_cap
-            )
+            exposure_cost = CHANNELS[primary_channel]["cost_per_exposure"] * count * freq_cap
 
             # Budget check
             if total_cost + exposure_cost > budget:
                 # Try cheaper channels
                 for candidate in ranked:
                     alt_cost = (
-                        CHANNELS[candidate["channel"]]["cost_per_exposure"]
-                        * count
-                        * freq_cap
+                        CHANNELS[candidate["channel"]]["cost_per_exposure"] * count * freq_cap
                     )
                     if total_cost + alt_cost <= budget:
                         primary_channel = candidate["channel"]
@@ -208,7 +202,10 @@ class ReachPlanner:
         """
         required_cols = {"segment", "hour", "activity_count"}
         if user_activity.empty or not required_cols.issubset(user_activity.columns):
-            return {"error": "DataFrame must have columns: segment, hour, activity_count", "timing": {}}
+            return {
+                "error": "DataFrame must have columns: segment, hour, activity_count",
+                "timing": {},
+            }
 
         result: dict[str, Any] = {}
         for segment, group in user_activity.groupby("segment"):
@@ -220,9 +217,7 @@ class ReachPlanner:
                 "peak_hour": peak_hour,
                 "top_3_hours": [int(h) for h in top_hours],
                 "recommended_push_window": self._format_time_window(peak_hour),
-                "activity_distribution": (
-                    group.set_index("hour")["activity_count"].to_dict()
-                ),
+                "activity_distribution": (group.set_index("hour")["activity_count"].to_dict()),
             }
 
         return {"timing": result}
@@ -261,9 +256,7 @@ class ReachPlanner:
             meta = CHANNELS[ch]
             # Bonus if segment is in channel's best_for list
             segment_bonus = 1.5 if segment in meta["best_for"] else 0.5
-            ranked.append(
-                {"channel": ch, "score": score * segment_bonus, "base_score": score}
-            )
+            ranked.append({"channel": ch, "score": score * segment_bonus, "base_score": score})
         ranked.sort(key=lambda x: x["score"], reverse=True)
         return ranked
 

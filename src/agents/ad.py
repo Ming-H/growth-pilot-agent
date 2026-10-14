@@ -20,6 +20,7 @@ try:
     from src.tools.ad.rta_strategy import RTAStrategy
 except ImportError as _import_err:
     import logging as _logging
+
     _logging.getLogger(__name__).warning("Tool import failed, using stubs: %s", _import_err)
 
     class _Stub:
@@ -33,6 +34,7 @@ except ImportError as _import_err:
                 raise RuntimeError(
                     f"Stub tool: {name}() called but tool is not available (import failed)"
                 )
+
             return _stub_method
 
     RTAStrategy = BidOptimizer = CreativeAnalyzer = AudienceAnalyzer = _Stub
@@ -66,7 +68,9 @@ class AdExpert(ExpertAgentBase):
         historical_data = self._build_sample_rta_data()
         rta_result = self._safe_execute(
             lambda: rta_strategy.build_rta_decision_rules(historical_data),
-            "RTAStrategy", errors, default={},
+            "RTAStrategy",
+            errors,
+            default={},
         )
         rta_rules = rta_result.get("rules", [])
 
@@ -80,7 +84,9 @@ class AdExpert(ExpertAgentBase):
                 cvr=cvr,
                 target_cpa=target_cpa,
             ),
-            "BidOptimizer", errors, default=None,
+            "BidOptimizer",
+            errors,
+            default=None,
         )
         bid_result: dict = {}
         if optimized_bid is not None:
@@ -97,7 +103,9 @@ class AdExpert(ExpertAgentBase):
             lambda: creative_analyzer.analyze_creative_performance(
                 sample_creative_data,
             ),
-            "CreativeAnalyzer", errors, default={},
+            "CreativeAnalyzer",
+            errors,
+            default={},
         )
         fatigue_alerts: list = []
         for c in creative_result.get("underperformers", []):
@@ -110,21 +118,30 @@ class AdExpert(ExpertAgentBase):
         sample_audience = self._build_sample_audience_data()
         audience_result = self._safe_execute(
             lambda: audience_analyzer.analyze_audience(sample_audience),
-            "AudienceAnalyzer", errors, default={},
+            "AudienceAnalyzer",
+            errors,
+            default={},
         )
         expansion_opportunities: list = []
         for seg_name, seg_data in audience_result.get("segments", {}).items():
             if isinstance(seg_data, dict) and seg_data.get("avg_ltv", 0) > 100:
                 expansion_opportunities.append(f"{seg_name}: high-value segment for expansion")
 
+        rta_metrics = rta_result.get("overall_metrics", {})
         return {
             "rta_rules": rta_rules,
-            "rta_metrics": rta_result.get("overall_metrics", {}),
+            "rta_metrics": rta_metrics,
             "bid_result": bid_result,
             "creative_result": creative_result,
             "fatigue_alerts": fatigue_alerts,
             "audience_result": audience_result,
             "expansion_opportunities": expansion_opportunities,
+            "kpis": {
+                "ad_target_cpa": float(bid_result.get("target_cpa", 0) or 0),
+                "ad_optimized_bid": float(bid_result.get("optimized_bid", 0) or 0),
+                "ad_impressions": float(rta_metrics.get("total_impressions", 0) or 0),
+                "ad_win_rate": float(rta_metrics.get("win_rate", 0) or 0),
+            },
             "errors": errors,
         }
 
@@ -172,10 +189,21 @@ class AdExpert(ExpertAgentBase):
     @staticmethod
     def can_handle(query: str) -> float:
         """Return confidence score (0-1) for handling this query."""
-        return ExpertAgentBase._keyword_confidence(query, [
-            "广告", "rta", "出价", "竞价", "创意",
-            "投放", "audience", "bid", "creative", "ad",
-        ])
+        return ExpertAgentBase._keyword_confidence(
+            query,
+            [
+                "广告",
+                "rta",
+                "出价",
+                "竞价",
+                "创意",
+                "投放",
+                "audience",
+                "bid",
+                "creative",
+                "ad",
+            ],
+        )
 
     # ------------------------------------------------------------------
     # Sample data builders (for demo mode when no real data available)
@@ -193,12 +221,14 @@ class AdExpert(ExpertAgentBase):
             outcome = rng.choice(["win", "loss", "no_bid"], p=[0.15, 0.35, 0.5])
             cpa = round(float(rng.uniform(30, 150)), 2) if outcome == "win" else None
             revenue = round(float(rng.uniform(50, 300)), 2) if outcome == "win" else 0
-            data.append({
-                "user_features": {"city_tier": tier, "intent_score": intent},
-                "outcome": outcome,
-                "cpa": cpa,
-                "revenue": revenue,
-            })
+            data.append(
+                {
+                    "user_features": {"city_tier": tier, "intent_score": intent},
+                    "outcome": outcome,
+                    "cpa": cpa,
+                    "revenue": revenue,
+                }
+            )
         return data
 
     @staticmethod
@@ -214,14 +244,16 @@ class AdExpert(ExpertAgentBase):
             conversions = int(clicks * rng.uniform(0.02, 0.15))
             spend = round(float(rng.uniform(1000, 10000)), 2)
             revenue = round(float(spend * rng.uniform(0.5, 3.0)), 2)
-            data.append({
-                "creative_id": f"creative_{i + 1:03d}",
-                "impressions": impressions,
-                "clicks": clicks,
-                "conversions": conversions,
-                "spend": spend,
-                "revenue": revenue,
-            })
+            data.append(
+                {
+                    "creative_id": f"creative_{i + 1:03d}",
+                    "impressions": impressions,
+                    "clicks": clicks,
+                    "conversions": conversions,
+                    "spend": spend,
+                    "revenue": revenue,
+                }
+            )
         return data
 
     @staticmethod
@@ -233,15 +265,17 @@ class AdExpert(ExpertAgentBase):
         data = []
         segments = ["new_user", "active", "moderate", "dormant", "high_value"]
         for i in range(100):
-            data.append({
-                "user_id": f"user_{i + 1:04d}",
-                "age": int(rng.randint(18, 55)),
-                "gender": rng.choice(["M", "F"]),
-                "city_tier": int(rng.choice([1, 2, 3, 4])),
-                "historical_orders": int(rng.randint(0, 30)),
-                "avg_order_value": round(float(rng.uniform(20, 200)), 2),
-                "days_since_last_order": int(rng.randint(0, 120)),
-                "ltv": round(float(rng.uniform(50, 500)), 2),
-                "segment": rng.choice(segments),
-            })
+            data.append(
+                {
+                    "user_id": f"user_{i + 1:04d}",
+                    "age": int(rng.randint(18, 55)),
+                    "gender": rng.choice(["M", "F"]),
+                    "city_tier": int(rng.choice([1, 2, 3, 4])),
+                    "historical_orders": int(rng.randint(0, 30)),
+                    "avg_order_value": round(float(rng.uniform(20, 200)), 2),
+                    "days_since_last_order": int(rng.randint(0, 120)),
+                    "ltv": round(float(rng.uniform(50, 500)), 2),
+                    "segment": rng.choice(segments),
+                }
+            )
         return data

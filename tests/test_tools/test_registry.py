@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.tools.registry import ToolRegistry, ToolMeta, register
-
+from src.tools.registry import ToolRegistry, register
 
 # ---------------------------------------------------------------------------
 # Sample tools for testing
@@ -104,8 +103,11 @@ class TestToolRegistryList:
     def test_get_meta(self):
         """Get metadata for a registered tool."""
         ToolRegistry.register_class(
-            "meta_tool", DummyTool,
-            category="test", description="Meta test tool", version="2.0.0",
+            "meta_tool",
+            DummyTool,
+            category="test",
+            description="Meta test tool",
+            version="2.0.0",
         )
         meta = ToolRegistry.get_meta("meta_tool")
         assert meta is not None

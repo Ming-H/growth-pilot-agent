@@ -113,10 +113,10 @@ class LTVPredictor:
         # Training metrics
         y_pred = self._reg_model.predict(X_arr)
         residuals = y_arr - y_pred
-        rmse = float(np.sqrt(np.mean(residuals ** 2)))
+        rmse = float(np.sqrt(np.mean(residuals**2)))
         mae = float(np.mean(np.abs(residuals)))
 
-        ss_res = np.sum(residuals ** 2)
+        ss_res = np.sum(residuals**2)
         ss_tot = np.sum((y_arr - y_arr.mean()) ** 2)
         r2 = float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0
 
@@ -163,7 +163,11 @@ class LTVPredictor:
 
     def _predict_probabilistic(self, cohort_data: pd.DataFrame | np.ndarray) -> pd.Series:
         """Predict using BG/NBD + Gamma-Gamma (lifetimes library)."""
-        df = cohort_data.copy() if isinstance(cohort_data, pd.DataFrame) else pd.DataFrame(np.asarray(cohort_data))
+        df = (
+            cohort_data.copy()
+            if isinstance(cohort_data, pd.DataFrame)
+            else pd.DataFrame(np.asarray(cohort_data))
+        )
 
         required = {"customer_id", "frequency", "recency", "T", "monetary_value"}
         missing = required - set(df.columns)

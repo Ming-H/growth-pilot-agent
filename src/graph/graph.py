@@ -7,6 +7,7 @@ The compiled graph can be invoked with an AnalysisState dict and will run
 through the full analysis lifecycle with optional quality refinement loops
 and human approval checkpoints.
 """
+
 from __future__ import annotations
 
 import logging
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Conditional edge routers
 # ---------------------------------------------------------------------------
+
 
 def _route_after_evaluate(state: AnalysisState) -> str:
     """Determine the next node after evaluation.
@@ -97,6 +99,7 @@ def _route_after_approval(state: AnalysisState) -> str:
 # Graph builder
 # ---------------------------------------------------------------------------
 
+
 def build_graph() -> StateGraph:
     """Build and return the *uncompiled* StateGraph DAG.
 
@@ -144,7 +147,7 @@ def build_graph() -> StateGraph:
         "evaluate",
         _route_after_evaluate,
         {
-            "refine": "refine",     # re-run only experts below quality threshold
+            "refine": "refine",  # re-run only experts below quality threshold
             "approval": "approval",
             "report": "report",
         },
@@ -201,6 +204,7 @@ async def build_compiled_graph():
 # Convenience: run a full analysis through the graph
 # ---------------------------------------------------------------------------
 
+
 async def run_analysis(
     *,
     query: str,
@@ -208,6 +212,7 @@ async def run_analysis(
     user_id: str = "anonymous",
     scope: str | None = None,
     budget: float | None = None,
+    data_path: str | None = None,
     approval_required: bool = False,
     thread_id: str = "default",
 ) -> dict[str, Any]:
@@ -223,6 +228,8 @@ async def run_analysis(
         user_id: User identifier.
         scope: Optional scope hint (e.g. "prospect", "full").
         budget: Optional budget for the analysis.
+        data_path: Optional path to a data file (CSV/Parquet) consumed by
+            experts that support external data (prospect, retention).
         approval_required: Whether human approval is required before reporting.
         thread_id: Unique identifier for the checkpoint thread.  Use the same
             ``thread_id`` when resuming after a human-approval interrupt.
@@ -230,9 +237,16 @@ async def run_analysis(
     Returns:
         Final AnalysisState dict after the graph completes.
     """
+    # Reset the process-global cost tracker so token/cost attribution is
+    # scoped to this analysis run (not accumulated across runs/requests).
+    from src.core.token_tracker import reset_cost_tracker
+
+    reset_cost_tracker()
+
     compiled_graph = await build_compiled_graph()
 
     from src.core.observability import trace_id_var
+
     trace_id_var.set(f"{org_id}:{thread_id}")
 
     initial_state: AnalysisState = {
@@ -241,6 +255,7 @@ async def run_analysis(
         "user_id": user_id,
         "scope": scope,
         "budget": budget,
+        "data_path": data_path,
         "approval_required": approval_required,
         "expert_results": [],
         "execution_errors": [],

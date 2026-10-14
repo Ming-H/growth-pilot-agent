@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 # Circuit Breaker
 # ---------------------------------------------------------------------------
 
+
 class CircuitState(enum.Enum):
     CLOSED = "closed"
     OPEN = "open"
@@ -67,8 +68,47 @@ class CircuitBreaker:
 
 
 # ---------------------------------------------------------------------------
+# Shared breaker registry
+# ---------------------------------------------------------------------------
+
+# Circuit breakers are shared per (provider, model, base_url) across the whole
+# process.  Without sharing, every call site (plan node, each expert, report
+# node) would own a private breaker and a provider-wide outage could never
+# trip a common circuit.
+_breaker_registry: dict[tuple[str, str, str], CircuitBreaker] = {}
+_breaker_registry_lock = threading.Lock()
+
+
+def _get_shared_breaker(
+    provider: str,
+    model: str,
+    base_url: str,
+    failure_threshold: int,
+    recovery_timeout: float,
+) -> CircuitBreaker:
+    """Return the process-wide CircuitBreaker for this LLM endpoint."""
+    key = (provider, model, base_url)
+    with _breaker_registry_lock:
+        breaker = _breaker_registry.get(key)
+        if breaker is None:
+            breaker = CircuitBreaker(
+                failure_threshold=failure_threshold,
+                recovery_timeout=recovery_timeout,
+            )
+            _breaker_registry[key] = breaker
+        return breaker
+
+
+def _reset_breaker_registry() -> None:
+    """Clear all shared breakers (for tests)."""
+    with _breaker_registry_lock:
+        _breaker_registry.clear()
+
+
+# ---------------------------------------------------------------------------
 # Resilient LLM proxy
 # ---------------------------------------------------------------------------
+
 
 class ResilientLLM:
     """Proxy that wraps primary + fallback LLMs with a circuit breaker.
@@ -141,6 +181,7 @@ class ResilientLLM:
 # Factory helpers
 # ---------------------------------------------------------------------------
 
+
 def create_llm(
     settings: Settings | None = None,
     provider: str | None = None,
@@ -148,10 +189,15 @@ def create_llm(
     temperature: float | None = None,
     tier: str | None = None,
     agent_name: str | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
 ) -> BaseChatModel:
     """Create an LLM instance based on configuration.
 
     Supports: openai, deepseek, local (Ollama).
+
+    ``api_key``/``base_url`` explicitly override the settings-derived values
+    (used to build a fallback LLM with its own credentials).
     """
     s = settings or get_settings()
 
@@ -160,7 +206,11 @@ def create_llm(
         tier_config = s.model_tiers[tier]
         p = provider or tier_config.get("provider", s.llm_provider)
         m = model or tier_config.get("model", s.llm_model)
-        t = temperature if temperature is not None else tier_config.get("temperature", s.llm_temperature)
+        t = (
+            temperature
+            if temperature is not None
+            else tier_config.get("temperature", s.llm_temperature)
+        )
     else:
         p = provider or s.llm_provider
         m = model or s.llm_model
@@ -169,21 +219,23 @@ def create_llm(
     if p in ("openai", "deepseek"):
         from langchain_openai import ChatOpenAI
 
-        base_url = s.llm_base_url or None
-        if p == "deepseek" and not base_url:
-            base_url = "https://api.deepseek.com"
+        resolved_base_url = base_url
+        if resolved_base_url is None:
+            resolved_base_url = s.llm_base_url or None
+            if p == "deepseek" and not resolved_base_url:
+                resolved_base_url = "https://api.deepseek.com"
 
-        # If tier config specifies a base_url, prefer it
-        if tier is not None and tier in s.model_tiers:
-            tier_base_url = s.model_tiers[tier].get("base_url")
-            if tier_base_url:
-                base_url = tier_base_url
+            # If tier config specifies a base_url, prefer it
+            if tier is not None and tier in s.model_tiers:
+                tier_base_url = s.model_tiers[tier].get("base_url")
+                if tier_base_url:
+                    resolved_base_url = tier_base_url
 
         # Fail-fast: only allow placeholder API key in demo mode
-        api_key = s.llm_api_key
-        if not api_key:
+        resolved_api_key = api_key or s.llm_api_key
+        if not resolved_api_key:
             if s.demo_mode:
-                api_key = "sk-demo-placeholder"
+                resolved_api_key = "sk-demo-placeholder"
             else:
                 raise ValueError("No LLM API key configured. Set GPA_LLM_API_KEY.")
         callbacks = []
@@ -195,8 +247,8 @@ def create_llm(
         return ChatOpenAI(
             model=m,
             temperature=t,
-            api_key=api_key,
-            base_url=base_url,
+            api_key=resolved_api_key,
+            base_url=resolved_base_url,
             callbacks=callbacks,
         )
 
@@ -221,9 +273,12 @@ def create_resilient_llm(
 ) -> BaseChatModel:
     """Create an LLM with fallback and circuit breaker support.
 
-    Returns a :class:`ResilientLLM` proxy when fallback is configured and
-    enabled; otherwise returns a plain :class:`BaseChatModel` from
-    :func:`create_llm`.
+    Returns a :class:`ResilientLLM` proxy when a *genuinely different*
+    fallback is configured; otherwise returns the plain primary LLM.
+
+    A fallback identical to the primary (same provider, model and endpoint)
+    is detected and rejected — retrying the same failing endpoint adds
+    latency without adding resilience.
     """
     s = settings or get_settings()
     primary = create_llm(settings=s, tier=tier, agent_name=agent_name)
@@ -231,7 +286,13 @@ def create_resilient_llm(
     if not s.fallback_enabled:
         return primary
 
-    # Try to create fallback LLM
+    # Resolve the effective primary endpoint identity for comparison
+    tier_config = s.model_tiers.get(tier or "", {})
+    primary_provider = tier_config.get("provider", s.llm_provider)
+    primary_model = tier_config.get("model", s.llm_model)
+    primary_base_url = tier_config.get("base_url", s.llm_base_url)
+
+    # Try to create fallback LLM with its own credentials/endpoint
     try:
         fallback_provider = s.fallback_provider
         fallback_model = s.fallback_model
@@ -241,16 +302,45 @@ def create_resilient_llm(
             settings=s,
             provider=fallback_provider,
             model=fallback_model,
+            api_key=s.fallback_api_key or None,
+            base_url=s.fallback_base_url or None,
         )
-    except Exception:
-        logger.warning("Failed to create fallback LLM, running without fallback")
+    except Exception as exc:
+        logger.warning("Failed to create fallback LLM, running without fallback: %s", exc)
         return primary
+
+    # Resolve the effective fallback endpoint identity
+    fallback_base_url = s.fallback_base_url
+    if not fallback_base_url and fallback_provider == "deepseek":
+        fallback_base_url = "https://api.deepseek.com"
+
+    # Reject self-fallback: same provider + model + endpoint as the primary
+    if (
+        fallback_provider == primary_provider
+        and fallback_model == primary_model
+        and fallback_base_url == primary_base_url
+    ):
+        logger.warning(
+            "Fallback LLM is identical to primary (%s/%s @ %s) — "
+            "disabling fallback. Configure a different GPA_FALLBACK_PROVIDER/MODEL.",
+            fallback_provider,
+            fallback_model,
+            fallback_base_url,
+        )
+        return primary
+
+    # Circuit breakers are shared per endpoint so a provider-wide outage
+    # trips one circuit for every call site in the process.
+    breaker = _get_shared_breaker(
+        provider=primary_provider,
+        model=primary_model,
+        base_url=primary_base_url or "",
+        failure_threshold=s.circuit_breaker_threshold,
+        recovery_timeout=s.circuit_breaker_recovery_seconds,
+    )
 
     return ResilientLLM(  # type: ignore[return-value]
         primary=primary,
         fallback=fallback,
-        circuit_breaker=CircuitBreaker(
-            failure_threshold=s.circuit_breaker_threshold,
-            recovery_timeout=s.circuit_breaker_recovery_seconds,
-        ),
+        circuit_breaker=breaker,
     )

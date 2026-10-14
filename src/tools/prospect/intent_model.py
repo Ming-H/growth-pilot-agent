@@ -102,7 +102,9 @@ class IntentModel:
         cv_scores: list[float] = []
         actual_folds = min(self.cv_folds, len(np.unique(y_arr)))
         if actual_folds >= 2:
-            skf = StratifiedKFold(n_splits=actual_folds, shuffle=True, random_state=self.random_state)
+            skf = StratifiedKFold(
+                n_splits=actual_folds, shuffle=True, random_state=self.random_state
+            )
             for train_idx, val_idx in skf.split(X_arr, y_arr):
                 X_tr, X_val = X_arr[train_idx], X_arr[val_idx]
                 y_tr, y_val = y_arr[train_idx], y_arr[val_idx]
@@ -183,10 +185,14 @@ class IntentModel:
     def get_feature_importance(self) -> pd.DataFrame:
         """Return a DataFrame of features ranked by importance (gain-based)."""
         fi = self._get_raw_feature_importance()
-        return pd.DataFrame(
-            list(fi.items()),
-            columns=["feature", "importance"],
-        ).sort_values("importance", ascending=False).reset_index(drop=True)
+        return (
+            pd.DataFrame(
+                list(fi.items()),
+                columns=["feature", "importance"],
+            )
+            .sort_values("importance", ascending=False)
+            .reset_index(drop=True)
+        )
 
     def _get_raw_feature_importance(self) -> dict[str, float]:
         """Get feature importance dict (gain), normalised to sum to 1."""

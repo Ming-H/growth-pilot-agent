@@ -7,6 +7,7 @@ evaluation, optional human approval, and final reporting.
 The state uses Annotated reducers for list fields so that parallel node
 outputs are automatically merged by LangGraph.
 """
+
 from __future__ import annotations
 
 import enum
@@ -56,6 +57,7 @@ class AnalysisState(TypedDict):
     query: str
     scope: NotRequired[str | None]
     budget: NotRequired[float | None]
+    data_path: NotRequired[str | None]
     org_id: str
     user_id: str
 

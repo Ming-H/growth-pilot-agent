@@ -113,7 +113,9 @@ class ChurnPredictor:
         cv_scores: list[float] = []
         actual_folds = min(self.cv_folds, len(np.unique(y_arr)))
         if actual_folds >= 2 and len(X_arr) >= 20:
-            skf = StratifiedKFold(n_splits=actual_folds, shuffle=True, random_state=self.random_state)
+            skf = StratifiedKFold(
+                n_splits=actual_folds, shuffle=True, random_state=self.random_state
+            )
             for train_idx, val_idx in skf.split(X_arr, y_arr):
                 X_tr, X_val = X_arr[train_idx], X_arr[val_idx]
                 y_tr, y_val = y_arr[train_idx], y_arr[val_idx]
@@ -241,20 +243,29 @@ class ChurnPredictor:
 
         for label, mask in [
             ("high_risk", df["churn_prob"] >= high_threshold),
-            ("medium_risk", (df["churn_prob"] >= medium_threshold) & (df["churn_prob"] < high_threshold)),
+            (
+                "medium_risk",
+                (df["churn_prob"] >= medium_threshold) & (df["churn_prob"] < high_threshold),
+            ),
             ("low_risk", df["churn_prob"] < medium_threshold),
         ]:
             seg_df = df[mask]
             profile = self._summarise_segment(seg_df)
             profile["count"] = int(len(seg_df))
-            profile["avg_churn_score"] = float(seg_df["churn_prob"].mean()) if len(seg_df) > 0 else 0.0
+            profile["avg_churn_score"] = (
+                float(seg_df["churn_prob"].mean()) if len(seg_df) > 0 else 0.0
+            )
             segments[label] = profile
 
         # Overall summary
         segments["summary"] = {
             "total_users": int(len(df)),
             "high_risk_pct": float((df["churn_prob"] >= high_threshold).mean()),
-            "medium_risk_pct": float(((df["churn_prob"] >= medium_threshold) & (df["churn_prob"] < high_threshold)).mean()),
+            "medium_risk_pct": float(
+                (
+                    (df["churn_prob"] >= medium_threshold) & (df["churn_prob"] < high_threshold)
+                ).mean()
+            ),
             "low_risk_pct": float((df["churn_prob"] < medium_threshold).mean()),
         }
 
@@ -267,10 +278,14 @@ class ChurnPredictor:
     def get_feature_importance(self) -> pd.DataFrame:
         """Return feature importance as a sorted DataFrame."""
         fi = self._get_feature_importance()
-        return pd.DataFrame(
-            list(fi.items()),
-            columns=["feature", "importance"],
-        ).sort_values("importance", ascending=False).reset_index(drop=True)
+        return (
+            pd.DataFrame(
+                list(fi.items()),
+                columns=["feature", "importance"],
+            )
+            .sort_values("importance", ascending=False)
+            .reset_index(drop=True)
+        )
 
     def _get_feature_importance(self) -> dict[str, float]:
         """Get normalised gain-based feature importance."""
@@ -299,8 +314,11 @@ class ChurnPredictor:
 
         # Numeric column summaries
         for col in [
-            "ride_count_30d", "avg_ride_distance", "night_ride_ratio",
-            "weekend_ride_ratio", "active_days_30d",
+            "ride_count_30d",
+            "avg_ride_distance",
+            "night_ride_ratio",
+            "weekend_ride_ratio",
+            "active_days_30d",
         ]:
             if col in seg_df.columns:
                 summary[f"mean_{col}"] = float(seg_df[col].mean())
@@ -336,7 +354,7 @@ class ChurnPredictor:
 
         # Make features predictive of churn
         logits = (
-            -0.8 * X["feature_0"]   # negative coefficient = higher feature_0 = less churn
+            -0.8 * X["feature_0"]  # negative coefficient = higher feature_0 = less churn
             - 0.4 * X["feature_1"]
             + 0.3 * X["feature_2"]
             + rng.logistic(size=n_samples)

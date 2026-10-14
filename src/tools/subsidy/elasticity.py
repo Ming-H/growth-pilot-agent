@@ -60,9 +60,7 @@ class ElasticityEstimator:
         instrument_vars = instrument_vars or []
 
         # Prepare data: drop rows with NaN/inf in key columns
-        req_cols = [price_col, demand_col] + [
-            c for c in control_vars if c in data.columns
-        ]
+        req_cols = [price_col, demand_col] + [c for c in control_vars if c in data.columns]
         clean = data[req_cols].dropna().copy()
 
         # Filter positive values (log transform requires > 0)
@@ -213,7 +211,7 @@ class ElasticityEstimator:
 
         # R-squared
         ss_res = float(np.sum(residuals**2))
-        ss_tot = float(np.sum((y - np.mean(y))**2))
+        ss_tot = float(np.sum((y - np.mean(y)) ** 2))
         r_squared = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
 
         return {
@@ -263,12 +261,16 @@ class ElasticityEstimator:
         fitted_price = Z @ pi
 
         # First-stage F-statistic for instrument relevance
-        ss_res_1 = float(np.sum((endog - fitted_price)**2))
-        ss_tot_1 = float(np.sum((endog - np.mean(endog))**2))
+        ss_res_1 = float(np.sum((endog - fitted_price) ** 2))
+        ss_tot_1 = float(np.sum((endog - np.mean(endog)) ** 2))
         r2_first = 1 - ss_res_1 / ss_tot_1 if ss_tot_1 > 0 else 0.0
         n_instruments = len(instruments)
         n_obs = len(data)
-        f_stat = (r2_first / n_instruments) / ((1 - r2_first) / max(n_obs - Z.shape[1], 1)) if (1 - r2_first) > 0 else 0.0
+        f_stat = (
+            (r2_first / n_instruments) / ((1 - r2_first) / max(n_obs - Z.shape[1], 1))
+            if (1 - r2_first) > 0
+            else 0.0
+        )
 
         # Stage 2: regress ln(demand) on fitted ln(price) + controls
         X2_parts: list[np.ndarray] = [np.ones(len(data)), fitted_price]

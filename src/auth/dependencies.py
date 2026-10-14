@@ -1,4 +1,5 @@
 """FastAPI authentication dependencies."""
+
 from __future__ import annotations
 
 from fastapi import Depends, HTTPException, status
@@ -42,6 +43,7 @@ async def get_current_user(
 
 def require_role(*roles: str):
     """Return a dependency that checks the current user has one of the given roles."""
+
     async def _check(user: User = Depends(get_current_user)) -> User:
         if user.role not in roles:
             raise HTTPException(
@@ -49,4 +51,5 @@ def require_role(*roles: str):
                 detail=f"Requires one of roles: {', '.join(roles)}",
             )
         return user
+
     return _check

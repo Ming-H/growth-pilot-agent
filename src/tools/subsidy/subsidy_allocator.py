@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-
 from src.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -118,7 +117,9 @@ class SubsidyAllocator:
                         "cost": round(seg_cost, 2),
                         "roi": round(expected_revenue / seg_cost, 4) if seg_cost > 0 else 0.0,
                     },
-                    "execution_priority": self._compute_priority(seg_name, ate, elasticity, expected_inc),
+                    "execution_priority": self._compute_priority(
+                        seg_name, ate, elasticity, expected_inc
+                    ),
                 }
             )
 
@@ -135,7 +136,9 @@ class SubsidyAllocator:
                 "total_users_targeted": sum(s["user_count"] for s in plan_segments),
                 "total_subsidy_cost": round(total_cost, 2),
                 "total_budget": round(total_budget, 2),
-                "budget_utilization": round(total_cost / total_budget, 4) if total_budget > 0 else 0.0,
+                "budget_utilization": round(total_cost / total_budget, 4)
+                if total_budget > 0
+                else 0.0,
                 "expected_incremental_orders": round(total_expected_orders, 2),
                 "expected_incremental_revenue": round(total_expected_revenue, 2),
                 "overall_roi": round(roi, 4),
@@ -283,26 +286,21 @@ class SubsidyAllocator:
         )
 
         # Segments with high elasticity
-        elastic_segs = [
-            s for s in plan_segments
-            if s["causal_effect"]["elasticity"] < -1.0
-        ]
+        elastic_segs = [s for s in plan_segments if s["causal_effect"]["elasticity"] < -1.0]
         if elastic_segs:
             names = ", ".join(s["segment"] for s in elastic_segs)
-            guidance.append(
-                f"2. 高价格敏感群体 ({names})：建议搭配限时优惠文案提升紧迫感"
-            )
+            guidance.append(f"2. 高价格敏感群体 ({names})：建议搭配限时优惠文案提升紧迫感")
 
         # Budget-constrained advice
         total_cost = sum(s["expected_outcomes"]["cost"] for s in plan_segments)
         guidance.append(
             f"3. 总补贴成本 {total_cost:.0f} 元，"
-            f"预计 ROI {sum(s['expected_outcomes']['expected_revenue'] for s in plan_segments) / total_cost:.1f}x"
+            f"预计 ROI {
+                sum(s['expected_outcomes']['expected_revenue'] for s in plan_segments)
+                / total_cost:.1f}x"
         )
 
         # Timing advice
-        guidance.append(
-            "4. 建议分批次执行：先投放高优先级群体，观察3天后调整低优先级群体策略"
-        )
+        guidance.append("4. 建议分批次执行：先投放高优先级群体，观察3天后调整低优先级群体策略")
 
         return guidance

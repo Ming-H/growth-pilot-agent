@@ -8,6 +8,7 @@ Design references:
 - LangGraph StateGraph: declarative DAG with conditional edges
 - OpenAI Runner: execution engine for the agent loop
 """
+
 from __future__ import annotations
 
 import logging
@@ -56,27 +57,23 @@ async def run_workflow(
         query=query,
         scope=scope or None,
         budget=budget or None,
+        data_path=data_path or None,
     )
 
     # Map AnalysisState fields to the old result dict format for backward compat
     expert_results_list: list[dict[str, Any]] = result_state.get("expert_results", [])
     expert_results_map = {
-        r.get("expert", f"unknown_{i}"): r
-        for i, r in enumerate(expert_results_list)
+        r.get("expert", f"unknown_{i}"): r for i, r in enumerate(expert_results_list)
     }
     final_report = result_state.get("final_report", "")
     execution_errors: list[str] = result_state.get("execution_errors", [])
 
-    # Build KPI snapshot from expert results
+    # Build KPI snapshot by merging each expert's standardised `kpis` dict
     kpi_snapshot: dict[str, Any] = {}
     for r in expert_results_list:
-        if r.get("expert") == "prospect":
-            kpi_snapshot["total_users"] = r.get("user_count", 0)
-            kpi_snapshot["intent_auc"] = r.get("intent_metrics", {}).get("auc", 0)
-        elif r.get("expert") == "subsidy":
-            kpi_snapshot["expected_roi"] = r.get("expected_roi", 0)
-        elif r.get("expert") == "ad":
-            kpi_snapshot["ad_cpa"] = r.get("expected_cpa", 0)
+        expert_kpis = r.get("kpis", {})
+        if isinstance(expert_kpis, dict):
+            kpi_snapshot.update(expert_kpis)
 
     result: dict[str, Any] = {
         "success": _is_success(result_state),

@@ -1,10 +1,10 @@
 """Tests for prospect tools: FeatureEngine, IntentModel, UserScorer, LTVPredictor, UserSegmentor."""
+
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # FeatureEngine
@@ -17,6 +17,7 @@ class TestFeatureEngine:
     @pytest.fixture
     def engine(self):
         from src.tools.prospect.feature_engine import FeatureEngine
+
         return FeatureEngine()
 
     @pytest.fixture
@@ -26,24 +27,28 @@ class TestFeatureEngine:
         rows = []
         for uid in range(1, 6):
             for i in range(3):
-                rows.append({
-                    "user_id": uid,
-                    "ride_time": now - pd.Timedelta(days=i * 3),
-                    "distance": 5.0 + uid + i,
-                    "destination_type": "residential",
-                    "fare": 15.0 + uid,
-                    "ride_duration": 20.0 + uid,
-                })
+                rows.append(
+                    {
+                        "user_id": uid,
+                        "ride_time": now - pd.Timedelta(days=i * 3),
+                        "distance": 5.0 + uid + i,
+                        "destination_type": "residential",
+                        "fare": 15.0 + uid,
+                        "ride_duration": 20.0 + uid,
+                    }
+                )
         return pd.DataFrame(rows)
 
     @pytest.fixture
     def sample_profiles(self):
-        return pd.DataFrame({
-            "user_id": range(1, 6),
-            "city_tier": [1, 2, 3, 1, 2],
-            "has_freight_search": [True, False, True, False, True],
-            "has_large_item_search": [False, True, False, True, False],
-        })
+        return pd.DataFrame(
+            {
+                "user_id": range(1, 6),
+                "city_tier": [1, 2, 3, 1, 2],
+                "has_freight_search": [True, False, True, False, True],
+                "has_large_item_search": [False, True, False, True, False],
+            }
+        )
 
     def test_instantiate(self, engine):
         assert engine is not None
@@ -95,6 +100,7 @@ class TestIntentModel:
     @pytest.fixture
     def model(self):
         from src.tools.prospect.intent_model import IntentModel
+
         return IntentModel(n_estimators=10, cv_folds=2)
 
     @pytest.fixture
@@ -140,6 +146,7 @@ class TestUserScorer:
     @pytest.fixture
     def scorer(self):
         from src.tools.prospect.user_scorer import UserScorer
+
         return UserScorer()
 
     def test_instantiate(self, scorer):
@@ -214,28 +221,34 @@ class TestLTVPredictor:
 
     def test_instantiate_ml(self):
         from src.tools.prospect.ltv_predictor import LTVPredictor
+
         pred = LTVPredictor(method="ml")
         assert pred.method == "ml"
 
     def test_instantiate_probabilistic(self):
         from src.tools.prospect.ltv_predictor import LTVPredictor
+
         pred = LTVPredictor(method="probabilistic")
         assert pred.method == "probabilistic"
 
     def test_instantiate_invalid_method_raises(self):
         from src.tools.prospect.ltv_predictor import LTVPredictor
+
         with pytest.raises(ValueError, match="method must be"):
             LTVPredictor(method="invalid")
 
     def test_train_and_predict_ml(self):
         from src.tools.prospect.ltv_predictor import LTVPredictor
+
         pred = LTVPredictor(method="ml", random_state=42)
         np.random.seed(42)
-        X = pd.DataFrame({
-            "ride_count": np.random.randint(1, 50, 40),
-            "avg_fare": np.random.uniform(10, 100, 40),
-            "recency_days": np.random.randint(1, 60, 40),
-        })
+        X = pd.DataFrame(
+            {
+                "ride_count": np.random.randint(1, 50, 40),
+                "avg_fare": np.random.uniform(10, 100, 40),
+                "recency_days": np.random.randint(1, 60, 40),
+            }
+        )
         y = X["ride_count"] * X["avg_fare"] * 0.5 + np.random.normal(0, 50, 40)
         metrics = pred.train(X, y)
         assert isinstance(metrics, dict)
@@ -247,6 +260,7 @@ class TestLTVPredictor:
 
     def test_compute_ltv_cac_ratio(self):
         from src.tools.prospect.ltv_predictor import LTVPredictor
+
         pred = LTVPredictor(method="ml")
         ltv_predictions = pd.Series([300, 200, 150, 250])
         cac_by_channel = {"organic": 50, "paid_search": 80, "social": 60}
@@ -267,17 +281,22 @@ class TestUserSegmentor:
     @pytest.fixture
     def segmentor(self):
         from src.tools.prospect.segmentor import UserSegmentor
+
         return UserSegmentor()
 
     @pytest.fixture
     def sample_user_data(self):
         now = pd.Timestamp.now()
-        return pd.DataFrame({
-            "user_id": range(1, 11),
-            "last_ride_date": [now - pd.Timedelta(days=d) for d in [1, 3, 7, 14, 30, 5, 10, 60, 90, 2]],
-            "ride_count": [20, 15, 8, 3, 1, 12, 6, 2, 0, 25],
-            "total_spent": [2000, 1500, 500, 100, 30, 1200, 400, 80, 0, 3000],
-        })
+        return pd.DataFrame(
+            {
+                "user_id": range(1, 11),
+                "last_ride_date": [
+                    now - pd.Timedelta(days=d) for d in [1, 3, 7, 14, 30, 5, 10, 60, 90, 2]
+                ],
+                "ride_count": [20, 15, 8, 3, 1, 12, 6, 2, 0, 25],
+                "total_spent": [2000, 1500, 500, 100, 30, 1200, 400, 80, 0, 3000],
+            }
+        )
 
     def test_instantiate(self, segmentor):
         assert segmentor is not None

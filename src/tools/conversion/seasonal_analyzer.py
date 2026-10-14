@@ -60,7 +60,10 @@ class SeasonalAnalyzer:
         else:
             period_int = int(period)
             detected_periods = [
-                {"period_days": period_int, "strength": self._period_strength(detrended, period_int)}
+                {
+                    "period_days": period_int,
+                    "strength": self._period_strength(detrended, period_int),
+                }
             ]
 
         # Compute overall seasonality strength (1 - variance_ratio)
@@ -249,9 +252,7 @@ class SeasonalAnalyzer:
             "avg_daily_forecast": round(np.mean(forecast_values), 2),
         }
 
-    def campaign_calendar(
-        self, year: int | None = None
-    ) -> list[dict[str, Any]]:
+    def campaign_calendar(self, year: int | None = None) -> list[dict[str, Any]]:
         """Return key campaign dates for Didi freight.
 
         Args:
@@ -374,20 +375,19 @@ class SeasonalAnalyzer:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _auto_detect_periods(
-        self, detrended: np.ndarray, n: int
-    ) -> list[dict[str, Any]]:
+    def _auto_detect_periods(self, detrended: np.ndarray, n: int) -> list[dict[str, Any]]:
         """Auto-detect dominant periods using autocorrelation."""
         # Compute autocorrelation for lags 1 to n//2
         max_lag = min(n // 2, 365)
         if max_lag < 2:
             return []
 
-        acf_values = np.array([
-            np.corrcoef(detrended[:-lag], detrended[lag:])[0, 1]
-            if lag < n else 0.0
-            for lag in range(1, max_lag + 1)
-        ])
+        acf_values = np.array(
+            [
+                np.corrcoef(detrended[:-lag], detrended[lag:])[0, 1] if lag < n else 0.0
+                for lag in range(1, max_lag + 1)
+            ]
+        )
 
         # Find peaks in autocorrelation
         peaks, properties = signal.find_peaks(acf_values, height=0.1, distance=3)
@@ -397,11 +397,13 @@ class SeasonalAnalyzer:
             period_days = int(peak + 1)  # lag 0 -> period 1
             strength = float(acf_values[peak])
             label = self._period_label(period_days)
-            periods.append({
-                "period_days": period_days,
-                "strength": round(strength, 4),
-                "label": label,
-            })
+            periods.append(
+                {
+                    "period_days": period_days,
+                    "strength": round(strength, 4),
+                    "label": label,
+                }
+            )
 
         # Sort by strength
         periods.sort(key=lambda x: x["strength"], reverse=True)
@@ -452,9 +454,7 @@ class SeasonalAnalyzer:
             return 0.0
         return min(1.0, seasonal_var / total_var)
 
-    def _day_of_week_pattern(
-        self, daily_metrics: pd.DataFrame
-    ) -> dict[str, float]:
+    def _day_of_week_pattern(self, daily_metrics: pd.DataFrame) -> dict[str, float]:
         """Compute average value per day of week."""
         df = daily_metrics.copy()
         df["dow"] = pd.to_datetime(df["date"]).dt.dayofweek
@@ -465,15 +465,23 @@ class SeasonalAnalyzer:
             pattern[name] = round(float(means.get(i, 0.0)), 2)
         return pattern
 
-    def _monthly_pattern(
-        self, daily_metrics: pd.DataFrame
-    ) -> dict[str, float]:
+    def _monthly_pattern(self, daily_metrics: pd.DataFrame) -> dict[str, float]:
         """Compute average value per month."""
         df = daily_metrics.copy()
         df["month"] = pd.to_datetime(df["date"]).dt.month
         month_names = [
-            "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
         ]
         pattern: dict[str, float] = {}
         means = df.groupby("month")["value"].mean()

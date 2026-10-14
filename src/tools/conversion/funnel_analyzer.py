@@ -18,13 +18,13 @@ logger = logging.getLogger(__name__)
 
 # Default funnel stages for Didi freight
 DEFAULT_FUNNEL_STAGES = [
-    "exposure",       # 曝光
-    "click",          # 点击
-    "app_open",       # 打开APP
-    "search",         # 搜索/发单
-    "quote_view",     # 查看报价
+    "exposure",  # 曝光
+    "click",  # 点击
+    "app_open",  # 打开APP
+    "search",  # 搜索/发单
+    "quote_view",  # 查看报价
     "order_confirm",  # 确认下单
-    "first_order",    # 首单完成
+    "first_order",  # 首单完成
 ]
 
 
@@ -65,7 +65,6 @@ class FunnelAnalyzer:
             return {"error": "need at least 2 stages with data", "stages": []}
 
         stage_metrics: list[dict[str, Any]] = []
-        overall_drop = 0.0
         bottleneck_stage = ordered[1]
         bottleneck_rate = 1.0
 
@@ -236,9 +235,7 @@ class FunnelAnalyzer:
             return f"中等瓶颈: {base}"
         return base
 
-    def _generate_reasons(
-        self, step: str, worst_segment: dict, gap: float
-    ) -> list[str]:
+    def _generate_reasons(self, step: str, worst_segment: dict, gap: float) -> list[str]:
         """Generate probable reason strings for the bottleneck."""
         reasons: list[str] = []
         step_reasons: dict[str, list[str]] = {
@@ -278,15 +275,11 @@ class FunnelAnalyzer:
         reasons.extend(base_reasons)
 
         if gap > 0.3:
-            reasons.append(
-                f"不同用户群体差异大（差距{gap:.1%}），建议分群优化策略"
-            )
+            reasons.append(f"不同用户群体差异大（差距{gap:.1%}），建议分群优化策略")
 
         return reasons
 
-    def _generate_actions(
-        self, step: str, worst_segment: dict, best_segment: dict
-    ) -> list[str]:
+    def _generate_actions(self, step: str, worst_segment: dict, best_segment: dict) -> list[str]:
         """Generate recommended actions."""
         actions: list[str] = []
         step_actions: dict[str, list[str]] = {

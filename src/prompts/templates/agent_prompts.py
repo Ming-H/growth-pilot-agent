@@ -11,6 +11,7 @@ Template variables injected at render time:
   - ``memory_context``   历史记忆上下文 dict
   - ``data_summary``     数据摘要 (agent-specific)
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -20,6 +21,7 @@ from src.prompts.templates.base import PromptTemplate
 # =====================================================================
 # Orchestrator
 # =====================================================================
+
 
 class OrchestratorPrompt(PromptTemplate):
     """Orchestrator agent prompt — scope detection + synthesis."""
@@ -108,6 +110,7 @@ class OrchestratorPrompt(PromptTemplate):
 # =====================================================================
 # Prospect
 # =====================================================================
+
 
 class ProspectPrompt(PromptTemplate):
     """Prospect agent prompt — user scoring, segmentation, LTV prediction."""
@@ -200,6 +203,7 @@ class ProspectPrompt(PromptTemplate):
 # Conversion
 # =====================================================================
 
+
 class ConversionPrompt(PromptTemplate):
     """Conversion agent prompt — funnel analysis, reach planning, coupons."""
 
@@ -232,7 +236,8 @@ class ConversionPrompt(PromptTemplate):
 
 {% if reach_summary %}**触达策略**: {{ reach_summary }}{% endif %}
 {% if funnel_overall_cvr %}- 整体转化率: {{ funnel_overall_cvr }}{% endif %}
-{% if bottleneck_stage %}- 漏斗瓶颈: {{ bottleneck_stage }} (转化率: {{ bottleneck_cvr }}){% endif %}
+{% if bottleneck_stage %}- 漏斗瓶颈: {{ bottleneck_stage }} (转化率: {{ bottleneck_cvr }})
+{% endif %}
 {% if slot_usage %}- 投放位分配: {{ slot_usage }}{% endif %}
 {% if coupon_summary %}- 优惠券方案: {{ coupon_summary }}{% endif %}
 
@@ -286,6 +291,7 @@ class ConversionPrompt(PromptTemplate):
 # =====================================================================
 # Subsidy
 # =====================================================================
+
 
 class SubsidyPrompt(PromptTemplate):
     """Subsidy agent prompt — causal inference, elasticity, budget optimization."""
@@ -379,6 +385,7 @@ class SubsidyPrompt(PromptTemplate):
 # Retention
 # =====================================================================
 
+
 class RetentionPrompt(PromptTemplate):
     """Retention agent prompt — churn prediction, nurture, winback."""
 
@@ -469,6 +476,7 @@ class RetentionPrompt(PromptTemplate):
 # =====================================================================
 # Ad
 # =====================================================================
+
 
 class AdPrompt(PromptTemplate):
     """Ad agent prompt — RTA strategy, bidding, creative, audience."""

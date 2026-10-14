@@ -15,11 +15,15 @@ from src.core import __version__
 # Request models
 # ---------------------------------------------------------------------------
 
+
 class AnalyzeRequest(BaseModel):
     """Request body for /api/v1/analyze and /api/v1/analyze/stream."""
 
     query: str = Field(default="", description="User query for growth analysis")
-    scope: str = Field(default="full", description="Analysis scope: full|prospect|conversion|subsidy|retention|ad|inapp")
+    scope: str = Field(
+        default="full",
+        description="Analysis scope: full|prospect|conversion|subsidy|retention|ad|inapp",
+    )
     data_path: str = Field(default="data/", description="Path to data directory")
     budget: float = Field(default=0.0, ge=0.0, description="Available budget")
 
@@ -34,6 +38,7 @@ class ApprovalRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Response models
 # ---------------------------------------------------------------------------
+
 
 class AnalysisResponse(BaseModel):
     """Synchronous analysis result."""
@@ -121,6 +126,7 @@ class MemoryClearResponse(BaseModel):
 # Human-in-the-loop approval models
 # ---------------------------------------------------------------------------
 
+
 class AnalysisStateResponse(BaseModel):
     """Response containing the current LangGraph checkpoint state."""
 
@@ -160,6 +166,7 @@ class ResumeResponse(BaseModel):
 # SSE event data model
 # ---------------------------------------------------------------------------
 
+
 class EventData(BaseModel):
     """SSE event payload for streaming analysis."""
 
@@ -171,7 +178,9 @@ class EventData(BaseModel):
 class AgentEvent(BaseModel):
     """Structured event for SSE streaming with stage tracking."""
 
-    type: str  # "plan", "execute", "evaluate", "approval", "report", "error", "progress", "complete"
+    type: (
+        str  # "plan", "execute", "evaluate", "approval", "report", "error", "progress", "complete"
+    )
     expert: str | None = None
     data: dict[str, Any] = Field(default_factory=dict)
     progress: float = 0.0  # 0.0 to 1.0

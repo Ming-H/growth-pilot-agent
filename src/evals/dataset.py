@@ -3,6 +3,7 @@
 Loads evaluation samples from JSON and provides built-in sample data
 covering all agent types in the freight growth domain.
 """
+
 from __future__ import annotations
 
 import json
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Data models
 # ---------------------------------------------------------------------------
+
 
 class EvalSample(BaseModel):
     """A single evaluation sample.
@@ -60,7 +62,13 @@ _BUILTIN_SAMPLES: list[dict[str, Any]] = [
         "id": "prospect_002",
         "input_query": "从滴滴出行用户中筛选出可能有搬家需求的用户群体，评估他们的LTV",
         "scope": "prospect",
-        "expected_keys": ["user_count", "segment_summary", "rfm_result_count", "top_users_sample", "analysis"],
+        "expected_keys": [
+            "user_count",
+            "segment_summary",
+            "rfm_result_count",
+            "top_users_sample",
+            "analysis",
+        ],
         "reference_answer": "应包含RFM分层结果、LTV预测值分布、高价值用户特征画像，以及触达优先级建议。",
         "agent_name": "prospect",
         "metadata": {"difficulty": "medium", "tags": ["LTV预测", "用户画像", "RFM分群"]},
@@ -74,7 +82,6 @@ _BUILTIN_SAMPLES: list[dict[str, Any]] = [
         "agent_name": "prospect",
         "metadata": {"difficulty": "medium", "tags": ["模型评估", "特征工程"]},
     },
-
     # --- Conversion Agent ---
     {
         "id": "conversion_001",
@@ -103,7 +110,6 @@ _BUILTIN_SAMPLES: list[dict[str, Any]] = [
         "agent_name": "conversion",
         "metadata": {"difficulty": "hard", "tags": ["流量位分配", "金刚位", "A/B测试"]},
     },
-
     # --- Subsidy Agent ---
     {
         "id": "subsidy_001",
@@ -123,7 +129,6 @@ _BUILTIN_SAMPLES: list[dict[str, Any]] = [
         "agent_name": "subsidy",
         "metadata": {"difficulty": "hard", "tags": ["预算分配", "最优化", "ROI"]},
     },
-
     # --- Retention Agent ---
     {
         "id": "retention_001",
@@ -152,7 +157,6 @@ _BUILTIN_SAMPLES: list[dict[str, Any]] = [
         "agent_name": "retention",
         "metadata": {"difficulty": "medium", "tags": ["用户培育", "群组分析", "留存曲线"]},
     },
-
     # --- Ad Agent ---
     {
         "id": "ad_001",
@@ -172,7 +176,6 @@ _BUILTIN_SAMPLES: list[dict[str, Any]] = [
         "agent_name": "ad",
         "metadata": {"difficulty": "easy", "tags": ["创意分析", "素材疲劳"]},
     },
-
     # --- Full / Orchestrator ---
     {
         "id": "full_001",
@@ -189,6 +192,7 @@ _BUILTIN_SAMPLES: list[dict[str, Any]] = [
 # ---------------------------------------------------------------------------
 # Dataset class
 # ---------------------------------------------------------------------------
+
 
 class EvalDataset:
     """Evaluation dataset manager.
@@ -266,10 +270,7 @@ class EvalDataset:
 
     def filter_by_difficulty(self, difficulty: str) -> list[EvalSample]:
         """Filter samples by difficulty level (easy/medium/hard)."""
-        return [
-            s for s in self._samples
-            if s.metadata.get("difficulty") == difficulty
-        ]
+        return [s for s in self._samples if s.metadata.get("difficulty") == difficulty]
 
     # ------------------------------------------------------------------
     # Statistics

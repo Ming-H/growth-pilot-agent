@@ -16,16 +16,18 @@ chat:
 	uv run python -m src.cli chat
 
 test:
-	uv run pytest tests/unit/ -v --tb=short
+	uv run python -m pytest tests/ -v --tb=short
 
-test-all:
-	uv run pytest tests/ -v --tb=short
+test-fast:
+	uv run python -m pytest tests/ -x -q
 
 lint:
-	uv run ruff check src/
+	uv run ruff check src/ tests/
+	uv run ruff format --check src/ tests/
 
 lint-fix:
-	uv run ruff check src/ --fix
+	uv run ruff check src/ tests/ --fix
+	uv run ruff format src/ tests/
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
@@ -36,7 +38,7 @@ setup-data:
 	uv run python -c "from src.tools.common.data_loader import DataLoader; dl = DataLoader(); [dl.load_sample_data(n) for n in ['user_behavior','funnel','subsidy_experiment','retention','ad_campaign','touchpoint_journey','seasonal_history']]"
 
 docker-build:
-	docker build -f Dockerfile -t growth-pilot-api .
+	docker build -f deploy/Dockerfile -t growth-pilot-api .
 
 docker-run:
 	docker run --rm -it -p 8000:8000 --env-file .env -v $(PWD)/data:/app/data growth-pilot-api
@@ -49,10 +51,6 @@ docker-down:
 
 docker-logs:
 	docker compose logs -f web
-
-docker-cli:
-	docker build -f deploy/Dockerfile -t growth-pilot-agent .
-	docker run --rm -it -v $(PWD)/data:/app/data growth-pilot-agent
 
 web:
 	uv run uvicorn src.web:app --host 0.0.0.0 --port 8000 --reload

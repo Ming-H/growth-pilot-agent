@@ -7,6 +7,7 @@ Design references:
 Unified with BaseAgent to inherit hooks, middleware stack, self-eval,
 and the shared _invoke_llm / _parse_json_response implementations.
 """
+
 from __future__ import annotations
 
 import json
@@ -98,8 +99,12 @@ class ExpertAgentBase(BaseAgent):
     # ------------------------------------------------------------------
 
     async def _execute(self, state: dict[str, Any]) -> dict[str, Any]:
-        """Implements BaseAgent._execute — delegates to analyze()."""
-        params = dict(state)
+        """Implements BaseAgent._execute — delegates to analyze().
+
+        When invoked through ``BaseAgent.run()`` the graph wraps params under
+        the ``"params"`` key; direct calls pass the params dict itself.
+        """
+        params = state.get("params", state)
         return await self.analyze(params)
 
     # ------------------------------------------------------------------
@@ -122,6 +127,7 @@ class ExpertAgentBase(BaseAgent):
         # Run deterministic pipeline (offloaded to thread to avoid blocking the event loop)
         try:
             import asyncio
+
             results = await asyncio.to_thread(self._execute_pipeline, params)
         except Exception as exc:
             logger.warning("[%s] Pipeline failed: %s", self.name, exc)
@@ -142,6 +148,10 @@ class ExpertAgentBase(BaseAgent):
 
         if errors:
             results["errors"] = errors
+
+        # Explicit success contract: downstream nodes (evaluate/refine/report)
+        # check this flag instead of relying on key absence.
+        results["success"] = not errors
 
         return results
 

@@ -1,13 +1,10 @@
 """Tests for src.graph.state - AnalysisState and AnalysisStatus."""
+
 from __future__ import annotations
 
-import enum
 import operator
 
-import pytest
-
 from src.graph.state import AnalysisState, AnalysisStatus, _replace_by_expert
-
 
 # ---------------------------------------------------------------------------
 # AnalysisStatus enum
@@ -195,6 +192,7 @@ class TestExecutionErrorsReducer:
     def test_annotation_type_expert_results(self):
         """Verify that expert_results uses _replace_by_expert reducer."""
         import typing
+
         hints = typing.get_type_hints(AnalysisState, include_extras=True)
         er_hint = hints.get("expert_results")
         assert er_hint is not None
@@ -205,6 +203,7 @@ class TestExecutionErrorsReducer:
     def test_annotation_type_execution_errors(self):
         """Verify that execution_errors still uses operator.add."""
         import typing
+
         hints = typing.get_type_hints(AnalysisState, include_extras=True)
         er_hint = hints.get("execution_errors")
         assert er_hint is not None

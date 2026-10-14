@@ -1,4 +1,5 @@
 """Tests for database ORM models."""
+
 from __future__ import annotations
 
 import pytest

@@ -8,6 +8,7 @@ Node contract:
     Input:  AnalysisState (full state, read-only)
     Output: dict with a subset of AnalysisState keys to update
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -23,10 +24,14 @@ logger = logging.getLogger(__name__)
 # Pydantic result validation
 # ---------------------------------------------------------------------------
 
+
 def _validate_expert_result(expert_key: str, result: dict[str, Any]) -> dict[str, Any]:
     """Validate expert result against its Pydantic model.
 
     Validates at the graph boundary to ensure type safety between agents.
+    Hook-injected metadata (keys with a ``_`` prefix, e.g. ``_trace``) is
+    stripped before validation and re-attached afterwards — Pydantic treats
+    underscore-prefixed names as private attributes.
     On validation failure, logs a warning but does not block the pipeline.
     """
     from src.core.models import EXPERT_RESULT_MODELS as _RESULT_MODELS
@@ -35,12 +40,15 @@ def _validate_expert_result(expert_key: str, result: dict[str, Any]) -> dict[str
     if not model_cls:
         return result
 
+    private_meta = {k: v for k, v in result.items() if k.startswith("_")}
+    public = {k: v for k, v in result.items() if not k.startswith("_")}
+
     try:
-        validated = model_cls(**result)
+        validated = model_cls(**public)
         validated_dict = validated.model_dump(exclude_none=True)
         validated_dict["expert"] = expert_key
         validated_dict["_validated"] = True
-        return validated_dict
+        return {**validated_dict, **private_meta}
     except Exception as exc:
         logger.warning("[validate] Pydantic validation failed for %s: %s", expert_key, exc)
         return result
@@ -64,13 +72,15 @@ User query: {query}
 Scope hint: {scope}
 
 Reply with ONLY a JSON object:
-{{"reasoning": "<brief reasoning>", "experts": ["<expert_key>", ...], "context_summary": "<one-line summary>"}}
+{{"reasoning": "<brief reasoning>", "experts": ["<expert_key>", ...],
+"context_summary": "<one-line summary>"}}
 """
 
 
 # ---------------------------------------------------------------------------
 # Helper: instantiate an expert by key
 # ---------------------------------------------------------------------------
+
 
 def _get_expert_cls(expert_key: str) -> type:
     """Lazy-import and return the ExpertAgentBase subclass for *expert_key*."""
@@ -85,6 +95,7 @@ def _get_expert_cls(expert_key: str) -> type:
         raise ValueError(f"Unknown expert key: {expert_key}")
     module_path, class_name = import_map[expert_key].rsplit(".", 1)
     import importlib
+
     module = importlib.import_module(module_path)
     return getattr(module, class_name)
 
@@ -158,9 +169,47 @@ async def plan_node(state: AnalysisState) -> dict:  # noqa: D401
         }
     query = guard_result.sanitized_input
 
+    # ── Memory retrieval (cross-session context) ────────────────────────
+    # Best-effort: memory unavailability must never block an analysis.
+    memory_context: list[dict[str, Any]] = []
+    try:
+        from src.core.config import get_settings
+        from src.memory.manager import MemoryManager
+
+        settings = get_settings()
+        memory = MemoryManager(
+            base_path=settings.memory_base_path,
+            org_id=state.get("org_id", "default"),
+        )
+        for hit in memory.search(query, limit=3):
+            summary = hit.get("results_summary", "")
+            if isinstance(summary, dict):
+                summary = str(summary.get("summary", summary))
+            memory_context.append(
+                {
+                    "query": str(hit.get("query", ""))[:120],
+                    "scope": hit.get("scope", ""),
+                    "summary": str(summary)[:300],
+                }
+            )
+        if memory_context:
+            logger.info(
+                "[plan_node] Injected %d memory entr(ies) into planning context",
+                len(memory_context),
+            )
+    except Exception as exc:
+        logger.debug("[plan_node] Memory retrieval unavailable: %s", exc)
+
+    memory_block = ""
+    if memory_context:
+        prior = "\n".join(
+            f"  - [{m['scope']}] {m['query']} -> {m['summary']}" for m in memory_context
+        )
+        memory_block = f"\nRelevant prior analyses for this org (use as context):\n{prior}\n"
+
     try:
         llm = create_resilient_llm(tier="default", agent_name="plan_node")
-        prompt = PLAN_PROMPT.format(query=query, scope=scope or "full")
+        prompt = PLAN_PROMPT.format(query=query, scope=scope or "full") + memory_block
         response = await llm.ainvoke(prompt)
         content = response.content if hasattr(response, "content") else str(response)
         content = content.strip()
@@ -171,7 +220,8 @@ async def plan_node(state: AnalysisState) -> dict:  # noqa: D401
 
         plan_data: dict[str, Any] = json.loads(content)
         selected_experts = [
-            e for e in plan_data.get("experts", [])
+            e
+            for e in plan_data.get("experts", [])
             if e in ("prospect", "conversion", "subsidy", "retention", "ad")
         ]
 
@@ -186,7 +236,7 @@ async def plan_node(state: AnalysisState) -> dict:  # noqa: D401
         )
 
         return {
-            "plan": plan_data,
+            "plan": {**plan_data, "memory_context": memory_context},
             "selected_experts": selected_experts,
             "status": AnalysisStatus.EXECUTING,
         }
@@ -199,6 +249,7 @@ async def plan_node(state: AnalysisState) -> dict:  # noqa: D401
                 "reasoning": f"LLM planning failed ({exc}); intent classify fallback",
                 "experts": selected_experts,
                 "context_summary": query[:100],
+                "memory_context": memory_context,
             },
             "selected_experts": selected_experts,
             "status": AnalysisStatus.EXECUTING,
@@ -266,6 +317,8 @@ async def execute_node(state: AnalysisState) -> dict:  # noqa: D401
     query = state.get("query", "")
     scope = state.get("scope") or ""
     budget = state.get("budget") or 0
+    data_path = state.get("data_path") or ""
+    memory_context = (state.get("plan") or {}).get("memory_context", [])
 
     if not selected_experts:
         logger.warning("[execute_node] No experts selected, nothing to execute")
@@ -275,17 +328,23 @@ async def execute_node(state: AnalysisState) -> dict:  # noqa: D401
             "status": AnalysisStatus.EVALUATING,
         }
 
+    from src.core.config import get_settings
+
+    timeout = get_settings().expert_timeout_seconds
+
     async def _run_expert(expert_key: str) -> tuple[str, dict[str, Any]]:
-        from src.core.config import get_settings
         expert = _create_expert(expert_key)
         params = {
             "query": query,
             "scope": scope,
             "budget": budget,
+            "data_path": data_path,
+            "memory_context": memory_context,
         }
-        timeout = get_settings().expert_timeout_seconds
         async with asyncio.timeout(timeout):
-            result = await expert.analyze(params)
+            # Route through BaseAgent.run() so the full hook lifecycle
+            # (tracing / logging / metrics) and middleware stack execute.
+            result = await expert.run({"params": params})
         return expert_key, result
 
     # Run all experts in parallel
@@ -297,13 +356,18 @@ async def execute_node(state: AnalysisState) -> dict:  # noqa: D401
 
     for expert_key, outcome in zip(selected_experts, raw_results):
         if isinstance(outcome, Exception):
+            # str(TimeoutError()) is empty — render timeouts explicitly
+            if isinstance(outcome, asyncio.TimeoutError):
+                outcome = TimeoutError(f"expert timed out after {timeout}s")
             err_msg = f"{expert_key}: {outcome}"
             execution_errors.append(err_msg)
-            expert_results.append({
-                "expert": expert_key,
-                "success": False,
-                "error": str(outcome),
-            })
+            expert_results.append(
+                {
+                    "expert": expert_key,
+                    "success": False,
+                    "error": str(outcome),
+                }
+            )
             logger.warning("[execute_node] Expert %s failed: %s", expert_key, outcome)
         else:
             _, result = outcome  # type: ignore[misc]
@@ -344,21 +408,36 @@ async def evaluate_node(state: AnalysisState) -> dict:  # noqa: D401
             "status": AnalysisStatus.REPORTING,
         }
 
-    # Convert list to dict keyed by expert name for batch_evaluate
+    # Convert list to dict keyed by expert name for batch_evaluate.
+    # Failed experts are scored 0 without an LLM call — re-running a failed
+    # pipeline via refine would waste two rounds of LLM calls for nothing.
     expert_results_dict: dict[str, Any] = {}
+    failed_scores: dict[str, Any] = {}
     for item in expert_results_list:
         key = item.get("expert", f"unknown_{id(item)}")
-        expert_results_dict[key] = item
+        if item.get("success") is False:
+            failed_scores[key] = {
+                "completeness": 0.0,
+                "actionability": 0.0,
+                "data_grounding": 0.0,
+                "overall": 0.0,
+                "reasoning": f"Expert execution failed: {item.get('error', 'unknown error')}",
+                "evaluation_failed": True,
+                "execution_failed": True,
+            }
+        else:
+            expert_results_dict[key] = item
 
     quality_scores = await batch_evaluate(expert_results_dict, query)
+    quality_scores_dicts = {k: v.model_dump() for k, v in quality_scores.items()}
+    quality_scores_dicts.update(failed_scores)
 
     # Determine if any expert scored below threshold
     from src.core.config import get_settings
 
     settings = get_settings()
     needs_refinement = any(
-        score.overall < settings.quality_threshold
-        for score in quality_scores.values()
+        score.overall < settings.quality_threshold for score in quality_scores.values()
     )
 
     current_round = state.get("refinement_round", 0) or 0
@@ -372,10 +451,9 @@ async def evaluate_node(state: AnalysisState) -> dict:  # noqa: D401
     )
 
     # Convert QualityScore objects to dicts for state storage
-    scores_dict = {k: v.model_dump() for k, v in quality_scores.items()}
-
+    # (failed experts were already added as zero scores above)
     return {
-        "quality_scores": scores_dict,
+        "quality_scores": quality_scores_dicts,
         "needs_refinement": needs_refinement,
         "refinement_round": next_round,
         "status": AnalysisStatus.EVALUATING,
@@ -401,10 +479,14 @@ async def refine_node(state: AnalysisState) -> dict:  # noqa: D401
     from src.core.config import get_settings
 
     settings = get_settings()
-    # Find experts that need refinement
+    # Find experts that need refinement.  Experts whose *execution* failed
+    # (execution_failed marker) are excluded — re-running a crashed pipeline
+    # is the job of retry middleware, not the quality loop.
     experts_to_refine = [
-        name for name, score_data in quality_scores.items()
+        name
+        for name, score_data in quality_scores.items()
         if score_data.get("overall", 1.0) < settings.quality_threshold
+        and not score_data.get("execution_failed")
     ]
 
     if not experts_to_refine:
@@ -427,7 +509,8 @@ async def refine_node(state: AnalysisState) -> dict:  # noqa: D401
             "refinement_feedback": feedback,
             "is_refinement": True,
         }
-        result = await expert.analyze(params)
+        async with asyncio.timeout(settings.expert_timeout_seconds):
+            result = await expert.run({"params": params})
         return expert_key, result
 
     coros = [_refine_expert(key) for key in experts_to_refine]
@@ -438,14 +521,18 @@ async def refine_node(state: AnalysisState) -> dict:  # noqa: D401
 
     for expert_key, outcome in zip(experts_to_refine, raw_results):
         if isinstance(outcome, Exception):
+            if isinstance(outcome, asyncio.TimeoutError):
+                outcome = TimeoutError(f"expert timed out after {settings.expert_timeout_seconds}s")
             err_msg = f"refine:{expert_key}: {outcome}"
             execution_errors.append(err_msg)
-            expert_results.append({
-                "expert": expert_key,
-                "success": False,
-                "error": str(outcome),
-                "refinement_attempt": True,
-            })
+            expert_results.append(
+                {
+                    "expert": expert_key,
+                    "success": False,
+                    "error": str(outcome),
+                    "refinement_attempt": True,
+                }
+            )
         else:
             _, result = outcome  # type: ignore[misc]
             result["expert"] = expert_key
@@ -537,7 +624,9 @@ async def report_node(state: AnalysisState) -> dict:  # noqa: D401
         success = result.get("success", True)
 
         if not success:
-            expert_summaries.append(f"### {expert_name}\nStatus: FAILED - {result.get('error', 'unknown error')}")
+            expert_summaries.append(
+                f"### {expert_name}\nStatus: FAILED - {result.get('error', 'unknown error')}"
+            )
             continue
 
         # Extract analysis summary if available
@@ -551,9 +640,7 @@ async def report_node(state: AnalysisState) -> dict:  # noqa: D401
         overall_score = score_info.get("overall", "N/A")
 
         expert_summaries.append(
-            f"### {expert_name}\n"
-            f"Quality Score: {overall_score}\n"
-            f"Summary: {summary}\n"
+            f"### {expert_name}\nQuality Score: {overall_score}\nSummary: {summary}\n"
         )
 
     report_prompt = f"""\
@@ -578,27 +665,29 @@ Be concise but specific. Use data and metrics from the expert results.
 """
 
     try:
-        llm = create_resilient_llm(tier="default", agent_name="report_node")
+        # Final synthesis reasons across all expert outputs — the strongest
+        # tier is reserved for this step (see Settings.model_tiers).
+        llm = create_resilient_llm(tier="power", agent_name="report_node")
         response = await llm.ainvoke(report_prompt)
         final_report = response.content if hasattr(response, "content") else str(response)
 
         from src.core.token_tracker import get_cost_tracker
+
         cost_report = get_cost_tracker().report()
         token_usage = {
-            "input_tokens": cost_report["total_tokens"],
-            "output_tokens": 0,
+            "input_tokens": cost_report["input_tokens"],
+            "output_tokens": cost_report["output_tokens"],
             "total_tokens": cost_report["total_tokens"],
         }
         cost_usd = cost_report["total_cost_usd"]
 
     except Exception as exc:
         logger.warning("[report_node] LLM report generation failed: %s", exc)
-        # Fallback: generate a simple report from expert results
-        findings = "\n".join(
-            f"- {r.get('expert', 'unknown')}: {'completed' if r.get('success', True) else 'failed'}"
-            for r in expert_results_list
-        )
-        final_report = f"# Analysis Report\n\n## Query\n{query}\n\n## Expert Findings\n{findings}\n"
+        # Deterministic fallback: the template-based ReportGenerator renders
+        # expert results without an LLM, so a report is always produced.
+        from src.report.generator import ReportGenerator
+
+        final_report = ReportGenerator().generate_report(dict(state))
         token_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
         cost_usd = 0.0
 

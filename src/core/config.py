@@ -20,9 +20,13 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://open.bigmodel.cn/api/coding/paas/v4"
     llm_temperature: float = 0.1
 
-    # Fallback model
-    fallback_provider: str = "openai"
-    fallback_model: str = "glm-4.7"
+    # Fallback model — a *different* provider than the primary, otherwise the
+    # fallback is useless (same endpoint failing twice).  Defaults to DeepSeek;
+    # set GPA_FALLBACK_API_KEY to activate true cross-vendor resilience.
+    fallback_provider: str = "deepseek"
+    fallback_model: str = "deepseek-chat"
+    fallback_api_key: str = ""
+    fallback_base_url: str = ""
 
     # Circuit breaker / resilience
     fallback_enabled: bool = True
@@ -31,9 +35,24 @@ class Settings(BaseSettings):
 
     # Model tiers configuration
     model_tiers: dict[str, dict[str, Any]] = {
-        "fast": {"provider": "openai", "model": "glm-4.7", "temperature": 0.3, "base_url": "https://open.bigmodel.cn/api/coding/paas/v4"},
-        "default": {"provider": "openai", "model": "glm-4.7", "temperature": 0.5, "base_url": "https://open.bigmodel.cn/api/coding/paas/v4"},
-        "power": {"provider": "openai", "model": "glm-4.7", "temperature": 0.7, "base_url": "https://open.bigmodel.cn/api/coding/paas/v4"},
+        "fast": {
+            "provider": "openai",
+            "model": "glm-4.7",
+            "temperature": 0.3,
+            "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+        },
+        "default": {
+            "provider": "openai",
+            "model": "glm-4.7",
+            "temperature": 0.5,
+            "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+        },
+        "power": {
+            "provider": "openai",
+            "model": "glm-4.7",
+            "temperature": 0.7,
+            "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+        },
     }
 
     # Memory system
@@ -56,7 +75,9 @@ class Settings(BaseSettings):
     max_refinement_rounds: int = 2
     quality_threshold: float = 0.7
     budget_approval_threshold: float = 10_000
-    expert_timeout_seconds: int = 120
+    # Must cover the deterministic pipeline AND the LLM synthesis call —
+    # a single slow LLM call can take 60-90s, so keep this well above it.
+    expert_timeout_seconds: int = 300
 
     # SSE streaming
     sse_timeout_seconds: int = 300
@@ -87,12 +108,18 @@ class Settings(BaseSettings):
     langsmith_api_key: str = ""
     langsmith_project: str = "growth-pilot"
 
-    model_config = {"env_prefix": "GPA_", "env_file": ".env", "extra": "ignore"}
+    model_config = {
+        "env_prefix": "GPA_",
+        "env_file": ".env",
+        "extra": "ignore",
+        "protected_namespaces": ("settings_",),
+    }
 
     @model_validator(mode="after")
     def _validate_security(self) -> "Settings":
         if not self.demo_mode and self.jwt_secret == "change-me-in-production":
             import logging
+
             logging.getLogger(__name__).warning(
                 "Default JWT secret detected in non-demo mode. "
                 "Set GPA_JWT_SECRET to a secure random string."

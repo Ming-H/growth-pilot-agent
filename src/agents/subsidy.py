@@ -30,6 +30,7 @@ try:
     )
 except ImportError as _import_err:
     import logging as _logging
+
     _logging.getLogger(__name__).warning("Tool import failed, using stubs: %s", _import_err)
 
     class _Stub:
@@ -43,6 +44,7 @@ except ImportError as _import_err:
                 raise RuntimeError(
                     f"Stub tool: {name}() called but tool is not available (import failed)"
                 )
+
             return _stub_method
 
     CausalInferenceEngine = ElasticityEstimator = BudgetOptimizer = SubsidyAllocator = _Stub  # type: ignore[assignment,misc]
@@ -80,10 +82,20 @@ class SubsidyExpert(ExpertAgentBase):
     @staticmethod
     def can_handle(query: str) -> float:
         """Return confidence score (0-1) for handling this query."""
-        return ExpertAgentBase._keyword_confidence(query, [
-            "补贴", "预算", "ROI", "因果", "弹性",
-            "subsidy", "budget", "causal", "elasticity",
-        ])
+        return ExpertAgentBase._keyword_confidence(
+            query,
+            [
+                "补贴",
+                "预算",
+                "ROI",
+                "因果",
+                "弹性",
+                "subsidy",
+                "budget",
+                "causal",
+                "elasticity",
+            ],
+        )
 
     # ------------------------------------------------------------------
     # System prompt
@@ -119,15 +131,17 @@ class SubsidyExpert(ExpertAgentBase):
         # Minimal synthetic fallback
         rng = np.random.default_rng(42)
         n = 1000
-        return pd.DataFrame({
-            "user_id": [f"U{i:04d}" for i in range(n)],
-            "treatment": rng.binomial(1, 0.5, size=n),
-            "converted": rng.binomial(1, 0.15, size=n),
-            "revenue": rng.lognormal(4.0, 0.6, size=n).round(2) * rng.binomial(1, 0.15, size=n),
-            "subsidy_amount": rng.choice([0, 5, 10, 20], size=n).astype(float),
-            "price": (rng.lognormal(3.0, 0.5, size=n) * 10).round(2),
-            "demand": rng.poisson(3, size=n).astype(float),
-        })
+        return pd.DataFrame(
+            {
+                "user_id": [f"U{i:04d}" for i in range(n)],
+                "treatment": rng.binomial(1, 0.5, size=n),
+                "converted": rng.binomial(1, 0.15, size=n),
+                "revenue": rng.lognormal(4.0, 0.6, size=n).round(2) * rng.binomial(1, 0.15, size=n),
+                "subsidy_amount": rng.choice([0, 5, 10, 20], size=n).astype(float),
+                "price": (rng.lognormal(3.0, 0.5, size=n) * 10).round(2),
+                "demand": rng.poisson(3, size=n).astype(float),
+            }
+        )
 
     # ------------------------------------------------------------------
     # Main pipeline
@@ -160,8 +174,7 @@ class SubsidyExpert(ExpertAgentBase):
         confidence = 0.0
         treatment_col = "treatment" if "treatment" in data.columns else "subsidy_amount"
         outcome_col = "converted" if "converted" in data.columns else "revenue"
-        confounders = [c for c in ["age", "city_tier", "historical_orders"]
-                       if c in data.columns]
+        confounders = [c for c in ["age", "city_tier", "historical_orders"] if c in data.columns]
 
         ate_raw = self._safe_execute(
             lambda: causal_engine.estimate_ate(
@@ -171,7 +184,9 @@ class SubsidyExpert(ExpertAgentBase):
                 confounders=confounders,
                 method="backdoor",
             ),
-            "CausalInferenceEngine", errors, default=None,
+            "CausalInferenceEngine",
+            errors,
+            default=None,
         )
         if ate_raw and "error" not in ate_raw:
             ate_result = ate_raw
@@ -201,14 +216,15 @@ class SubsidyExpert(ExpertAgentBase):
                 price_col=price_col,
                 demand_col=demand_col,
             ),
-            "ElasticityEstimator", errors, default=None,
+            "ElasticityEstimator",
+            errors,
+            default=None,
         )
         if elasticity_raw and "error" not in elasticity_raw:
             elasticity_result = elasticity_raw
             elasticity_val = elasticity_result.get("elasticity", -1.0)
             elasticity_result["_summary"] = (
-                f"价格弹性={elasticity_val:.4f}, "
-                f"{elasticity_result.get('interpretation', '')}"
+                f"价格弹性={elasticity_val:.4f}, {elasticity_result.get('interpretation', '')}"
             )
             price_sensitivity = {
                 "elasticity": elasticity_val,
@@ -258,7 +274,9 @@ class SubsidyExpert(ExpertAgentBase):
                 max_coupon=50,
                 coupon_step=5,
             ),
-            "BudgetOptimizer", errors, default=None,
+            "BudgetOptimizer",
+            errors,
+            default=None,
         )
         if budget_raw and "error" not in budget_raw:
             budget_result = budget_raw
@@ -271,9 +289,22 @@ class SubsidyExpert(ExpertAgentBase):
             if budget > 0:
                 budget_result = {
                     "allocation": {
-                        "new_user": {"coupon_amount": budget * 0.35 / max(user_segments.get("new_user", 1), 1), "user_count": 500},
-                        "active": {"coupon_amount": budget * 0.25 / max(user_segments.get("active", 1), 1), "user_count": 300},
-                        "dormant": {"coupon_amount": budget * 0.20 / max(user_segments.get("dormant", 1), 1), "user_count": 200},
+                        "new_user": {
+                            "coupon_amount": budget
+                            * 0.35
+                            / max(user_segments.get("new_user", 1), 1),
+                            "user_count": 500,
+                        },
+                        "active": {
+                            "coupon_amount": budget * 0.25 / max(user_segments.get("active", 1), 1),
+                            "user_count": 300,
+                        },
+                        "dormant": {
+                            "coupon_amount": budget
+                            * 0.20
+                            / max(user_segments.get("dormant", 1), 1),
+                            "user_count": 200,
+                        },
                     },
                     "total_budget_used": budget * 0.8,
                     "expected_incremental_orders": budget * 0.04,
@@ -290,7 +321,9 @@ class SubsidyExpert(ExpertAgentBase):
                 budget_plan=budget_result,
                 user_segments=user_segments,
             ),
-            "SubsidyAllocator", errors, default=None,
+            "SubsidyAllocator",
+            errors,
+            default=None,
         )
         if alloc_raw and "error" not in alloc_raw:
             allocation_result = alloc_raw
@@ -307,6 +340,12 @@ class SubsidyExpert(ExpertAgentBase):
             "budget_plan": budget_result,
             "expected_roi": expected_roi,
             "allocation_plan": allocation_result,
+            "kpis": {
+                "expected_roi": float(expected_roi or 0),
+                "subsidy_ate": float(ate_result.get("ate", 0) or 0)
+                if isinstance(ate_result, dict)
+                else 0.0,
+            },
         }
         if errors:
             result["errors"] = errors

@@ -258,17 +258,24 @@ class NurturePlanner:
         if city_tier and int(city_tier) <= 2:
             # Tier-1/2 cities: emphasise speed and convenience
             plan["day1"].append(
-                {"action": "premium_trial", "channel": "push", "message": "一线城市极速达，首单免费升级"}
+                {
+                    "action": "premium_trial",
+                    "channel": "push",
+                    "message": "一线城市极速达，首单免费升级",
+                }
             )
             meta["city_tier_personalised"] = True
 
         has_freight = user_dict.get("has_freight_search", False)
         if has_freight:
-            plan["day1"].insert(0, {
-                "action": "freight_onboarding",
-                "channel": "in_app",
-                "message": "你已搜索过货运，立即享受专属优惠",
-            })
+            plan["day1"].insert(
+                0,
+                {
+                    "action": "freight_onboarding",
+                    "channel": "in_app",
+                    "message": "你已搜索过货运，立即享受专属优惠",
+                },
+            )
             meta["freight_interest_personalised"] = True
 
         return plan, meta
@@ -283,26 +290,38 @@ class NurturePlanner:
         recs: list[str] = []
 
         if health == "underperforming":
-            recs.append("Overall retention is significantly below baseline. Consider revisiting the entire onboarding flow.")
+            recs.append(
+                "Overall retention is significantly below baseline. "
+                "Consider revisiting the entire onboarding flow."
+            )
 
         # Check specific phases
         for phase, dev in deviation.items():
             if dev < -0.10:
                 recs.append(
-                    f"{phase} retention is {abs(dev)*100:.1f}pp below baseline. "
+                    f"{phase} retention is {abs(dev) * 100:.1f}pp below baseline. "
                     "Intensify engagement actions at this stage."
                 )
 
         if actual.get("day1", 1.0) < 0.95:
-            recs.append("Day-1 retention drop detected. Review welcome experience and first-use friction.")
+            recs.append(
+                "Day-1 retention drop detected. Review welcome experience and first-use friction."
+            )
 
         if actual.get("day7", 0) < 0.30:
-            recs.append("Week-1 retention is low. Strengthen second-ride incentive and push notification strategy.")
+            recs.append(
+                "Week-1 retention is low. Strengthen second-ride incentive "
+                "and push notification strategy."
+            )
 
         if actual.get("day30", 0) < 0.15:
-            recs.append("30-day retention critically low. Introduce loyalty programme or milestone rewards.")
+            recs.append(
+                "30-day retention critically low. Introduce loyalty programme or milestone rewards."
+            )
 
         if not recs:
-            recs.append("Retention is on track. Continue monitoring and A/B test incremental improvements.")
+            recs.append(
+                "Retention is on track. Continue monitoring and A/B test incremental improvements."
+            )
 
         return recs

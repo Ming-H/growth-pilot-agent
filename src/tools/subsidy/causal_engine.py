@@ -60,7 +60,10 @@ class CausalInferenceEngine:
 
         if len(unique_treatments) < 2:
             return {
-                "error": f"treatment variable must have at least 2 levels, got {unique_treatments.tolist()}"
+                "error": (
+                    "treatment variable must have at least 2 levels, "
+                    f"got {unique_treatments.tolist()}"
+                )
             }
 
         # Check treatment-control sizes
@@ -94,9 +97,7 @@ class CausalInferenceEngine:
             "control_count": control_count,
             "confounders_used": available_confounders,
             "balance_check": balance,
-            "all_confounders_balanced": all(
-                b["balanced"] for b in balance.values()
-            ),
+            "all_confounders_balanced": all(b["balanced"] for b in balance.values()),
         }
 
     def estimate_ate(
@@ -145,9 +146,7 @@ class CausalInferenceEngine:
                 data, treatment, outcome, available_confounders, treatment_vals, outcome_vals
             )
         elif method == "backdoor":
-            return self._ate_backdoor(
-                data, treatment, outcome, available_confounders, outcome_vals
-            )
+            return self._ate_backdoor(data, treatment, outcome, available_confounders, outcome_vals)
         else:
             return {"error": f"unknown method: {method}. Use 'backdoor', 'ipw', or 'diff_in_means'"}
 
@@ -262,9 +261,7 @@ class CausalInferenceEngine:
                 )
             elif method == "placebo_treatment":
                 # Replace treatment with random assignment
-                data_sim["_placebo_treatment"] = np.random.binomial(
-                    1, 0.5, size=len(data_sim)
-                )
+                data_sim["_placebo_treatment"] = np.random.binomial(1, 0.5, size=len(data_sim))
                 result = self.estimate_ate(
                     data_sim, "_placebo_treatment", outcome, confounders, method="backdoor"
                 )
@@ -331,7 +328,9 @@ class CausalInferenceEngine:
             return {"error": f"cannot estimate ATE: {ate_result['error']}"}
 
         ate = ate_result["ate"]
-        control_mean = ate_result.get("control_mean", float(data.loc[data[treatment] == 0, outcome].mean()))
+        control_mean = ate_result.get(
+            "control_mean", float(data.loc[data[treatment] == 0, outcome].mean())
+        )
 
         # Current treatment rate
         current_rate = float(data[treatment].mean())
@@ -379,7 +378,9 @@ class CausalInferenceEngine:
         c_outcomes = outcome[control_mask]
 
         ate = float(np.mean(t_outcomes) - np.mean(c_outcomes))
-        se = float(np.sqrt(np.var(t_outcomes) / len(t_outcomes) + np.var(c_outcomes) / len(c_outcomes)))
+        se = float(
+            np.sqrt(np.var(t_outcomes) / len(t_outcomes) + np.var(c_outcomes) / len(c_outcomes))
+        )
         ci_lower = ate - 1.96 * se
         ci_upper = ate + 1.96 * se
 
@@ -456,8 +457,16 @@ class CausalInferenceEngine:
         t_stat = ate / se if se > 0 else 0.0
         p_value = float(2 * stats.norm.sf(abs(t_stat)))
 
-        control_mean = float(np.mean(y[data[treatment].values[valid_mask] == 0])) if np.sum(data[treatment].values[valid_mask] == 0) > 0 else 0.0
-        treated_mean = float(np.mean(y[data[treatment].values[valid_mask] == 1])) if np.sum(data[treatment].values[valid_mask] == 1) > 0 else 0.0
+        control_mean = (
+            float(np.mean(y[data[treatment].values[valid_mask] == 0]))
+            if np.sum(data[treatment].values[valid_mask] == 0) > 0
+            else 0.0
+        )
+        treated_mean = (
+            float(np.mean(y[data[treatment].values[valid_mask] == 1]))
+            if np.sum(data[treatment].values[valid_mask] == 1) > 0
+            else 0.0
+        )
 
         return {
             "method": "backdoor_regression",
@@ -494,7 +503,12 @@ class CausalInferenceEngine:
             n_c = int(control_mask.sum())
 
             ate = float(np.mean(outcome_vals[treated_mask]) - np.mean(outcome_vals[control_mask]))
-            se = float(np.sqrt(np.var(outcome_vals[treated_mask]) / n_t + np.var(outcome_vals[control_mask]) / n_c))
+            se = float(
+                np.sqrt(
+                    np.var(outcome_vals[treated_mask]) / n_t
+                    + np.var(outcome_vals[control_mask]) / n_c
+                )
+            )
 
             return {
                 "method": "ipw",
@@ -542,8 +556,12 @@ class CausalInferenceEngine:
         control_mask = treatment_vals == 0
 
         # E[Y|T=1] estimated by IPW
-        ipw_treated = np.sum(outcome_vals[treated_mask] / ps[treated_mask]) / np.sum(1 / ps[treated_mask])
-        ipw_control = np.sum(outcome_vals[control_mask] / (1 - ps[control_mask])) / np.sum(1 / (1 - ps[control_mask]))
+        ipw_treated = np.sum(outcome_vals[treated_mask] / ps[treated_mask]) / np.sum(
+            1 / ps[treated_mask]
+        )
+        ipw_control = np.sum(outcome_vals[control_mask] / (1 - ps[control_mask])) / np.sum(
+            1 / (1 - ps[control_mask])
+        )
 
         ate = float(ipw_treated - ipw_control)
 
@@ -561,7 +579,9 @@ class CausalInferenceEngine:
             if t_mask_b.sum() < 2 or c_mask_b.sum() < 2:
                 continue
             ipw_t_b = np.sum(y_b[t_mask_b] / ps_b[t_mask_b]) / np.sum(1 / ps_b[t_mask_b])
-            ipw_c_b = np.sum(y_b[c_mask_b] / (1 - ps_b[c_mask_b])) / np.sum(1 / (1 - ps_b[c_mask_b]))
+            ipw_c_b = np.sum(y_b[c_mask_b] / (1 - ps_b[c_mask_b])) / np.sum(
+                1 / (1 - ps_b[c_mask_b])
+            )
             boot_ates.append(float(ipw_t_b - ipw_c_b))
 
         se = float(np.std(boot_ates)) if boot_ates else 0.0

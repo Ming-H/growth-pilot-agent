@@ -1,20 +1,21 @@
 """Tests for src.core.models - Pydantic structured models."""
+
 from __future__ import annotations
 
 import pytest
 
 from src.core.models import (
-    AgentResult,
-    ConversionResult,
-    LLMAnalysis,
-    KpiSnapshot,
-    ProspectResult,
-    SegmentInfo,
-    SubsidyResult,
-    RetentionResult,
     AdResult,
+    AgentResult,
     BidResult,
     ChurnRisk,
+    ConversionResult,
+    KpiSnapshot,
+    LLMAnalysis,
+    ProspectResult,
+    RetentionResult,
+    SegmentInfo,
+    SubsidyResult,
 )
 
 

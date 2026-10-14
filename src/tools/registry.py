@@ -6,6 +6,7 @@ Provides:
 - ToolRegistry.list_tools() for discovery
 - Metadata support (category, description)
 """
+
 from __future__ import annotations
 
 import logging
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 # Tool protocol
 # ---------------------------------------------------------------------------
 
+
 @runtime_checkable
 class ToolProtocol(Protocol):
     """Standard interface for all tools."""
@@ -33,6 +35,7 @@ class ToolProtocol(Protocol):
 # Tool metadata model
 # ---------------------------------------------------------------------------
 
+
 class ToolMeta(BaseModel):
     """Metadata associated with a registered tool."""
 
@@ -45,6 +48,7 @@ class ToolMeta(BaseModel):
 # ---------------------------------------------------------------------------
 # Tool Registry
 # ---------------------------------------------------------------------------
+
 
 class ToolRegistry:
     """Centralized registry for growth tools.
@@ -87,6 +91,7 @@ class ToolRegistry:
             description: Human-readable tool description.
             version: Tool version string.
         """
+
         def decorator(tool_cls: Type) -> Type:
             if name in cls._tools:
                 logger.warning("Tool '%s' already registered, overwriting", name)
@@ -99,6 +104,7 @@ class ToolRegistry:
             )
             logger.debug("Registered tool: %s (category=%s)", name, category)
             return tool_cls
+
         return decorator
 
     @classmethod
@@ -130,10 +136,7 @@ class ToolRegistry:
             ValueError: If the tool name is not registered.
         """
         if name not in cls._tools:
-            raise ValueError(
-                f"Unknown tool: '{name}'. "
-                f"Available: {cls.list_tools()}"
-            )
+            raise ValueError(f"Unknown tool: '{name}'. Available: {cls.list_tools()}")
         return cls._tools[name](**kwargs)
 
     # ------------------------------------------------------------------
@@ -148,10 +151,7 @@ class ToolRegistry:
     @classmethod
     def list_tools_by_category(cls, category: str) -> list[str]:
         """List tool names filtered by category."""
-        return sorted(
-            name for name, meta in cls._meta.items()
-            if meta.category == category
-        )
+        return sorted(name for name, meta in cls._meta.items() if meta.category == category)
 
     @classmethod
     def get_meta(cls, name: str) -> ToolMeta | None:
@@ -217,12 +217,14 @@ class ToolRegistry:
         result = []
         for name in cls.list_tools():
             meta = cls._meta.get(name, ToolMeta(name=name))
-            result.append({
-                "name": name,
-                "category": meta.category,
-                "description": meta.description[:80],
-                "version": meta.version,
-            })
+            result.append(
+                {
+                    "name": name,
+                    "category": meta.category,
+                    "description": meta.description[:80],
+                    "version": meta.version,
+                }
+            )
         return result
 
 

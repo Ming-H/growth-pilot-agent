@@ -11,6 +11,7 @@ configuration:
 If the ``langgraph-checkpoint-postgres`` package is not installed, the factory
 gracefully falls back to ``MemorySaver`` regardless of the demo_mode flag.
 """
+
 from __future__ import annotations
 
 import logging
@@ -43,7 +44,11 @@ async def get_checkpointer():  # noqa: ANN202 – return type depends on backend
 
     # --- Demo mode or missing PostgresSaver -> MemorySaver ----------------
     if settings.demo_mode or not _PostgresSaver_available:
-        reason = "demo_mode=True" if settings.demo_mode else "langgraph-checkpoint-postgres not installed"
+        reason = (
+            "demo_mode=True"
+            if settings.demo_mode
+            else "langgraph-checkpoint-postgres not installed"
+        )
         logger.info("[checkpoint] Using MemorySaver (%s)", reason)
         return MemorySaver()
 
@@ -57,7 +62,9 @@ async def get_checkpointer():  # noqa: ANN202 – return type depends on backend
     try:
         checkpointer = AsyncPostgresSaver.from_conn_string(conn_string)
         await checkpointer.setup()
-        logger.info("[checkpoint] AsyncPostgresSaver initialised (db_url=%s)", conn_string.split("@")[-1])
+        logger.info(
+            "[checkpoint] AsyncPostgresSaver initialised (db_url=%s)", conn_string.split("@")[-1]
+        )
         return checkpointer
     except Exception as exc:
         logger.warning(

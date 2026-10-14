@@ -9,8 +9,8 @@
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-%E2%89%A50.2-green?logo=langchain&logoColor=white)](https://github.com/langchain-ai/langgraph)
 [![FastAPI](https://img.shields.io/badge/FastAPI-%E2%89%A50.110-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Tests](https://img.shields.io/badge/tests-452%20passed-brightgreen)](./tests)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/Version-6.0.0-orange)](./pyproject.toml)
 
 </div>
 
@@ -19,414 +19,164 @@
 ## Architecture Overview
 
 ```
-                           ┌──────────────────────────────────────────────────┐
-                           │               LangGraph StateGraph               │
-                           │                 (Compiled Graph)                 │
-                           └─────────────────────┬────────────────────────────┘
-                                                 │
-                                                 ▼
-                                      ┌─────────────────────┐
-                                      │    ORCHESTRATOR      │
-                                      │   Scope Detection    │
-                                      │  (Intent Keywords)   │
-                                      └─────────┬───────────┘
-                                                │
-                          ┌─────────────────────┼─────────────────────┐
-                          │                     │                     │
-                          ▼                     ▼                     ▼
-                 ┌────────────────┐    ┌────────────────┐    ┌────────────────┐
-                 │   PROSPECT     │    │    SUBSIDY      │    │      AD        │
-                 │  Agent Node    │    │  Agent Node     │    │  Agent Node    │
-                 │                │    │                 │    │                │
-                 │ · FeatureEngine│    │ · DoWhy Causal  │    │ · RTA Strategy │
-                 │ · LightGBM     │    │ · Elasticity    │    │ · Bid Optim    │
-                 │ · UserScorer   │    │ · PuLP Optim    │    │ · Creative     │
-                 │ · LTV (BG/NBD) │    │ · Allocator     │    │ · Audience     │
-                 └───────┬────────┘    └───────┬─────────┘    └───────┬────────┘
-                         │                     │                      │
-                         └──────────┬──────────┘──────────────────────┘
-                                    │          Fan-in (parallel join)
-                                    ▼
-                          ┌──────────────────┐
-                          │   CONVERSION      │
-                          │  Agent Node       │
-                          │                   │
-                          │ · FunnelAnalyzer  │
-                          │ · ReachPlanner    │
-                          │ · SlotAllocator   │
-                          │ · CouponDesigner  │
-                          │ · Multi-Touch Attr│
-                          └────────┬──────────┘
-                                   │
-                                   ▼
-                          ┌──────────────────┐
-                          │   RETENTION       │
-                          │  Agent Node       │
-                          │                   │
-                          │ · ChurnPredictor  │
-                          │ · CohortAnalyzer  │
-                          │ · NurturePlanner  │
-                          │ · WinbackPlanner  │
-                          └────────┬──────────┘
-                                   │
-                                   ▼
-                          ┌──────────────────┐
-                          │   SYNTHESIS       │
-                          │  (LLM Agg)        │
-                          │                   │
-                          │ · KPI Snapshot    │
-                          │ · Strategy Summary│
-                          └────────┬──────────┘
-                                   │
-                                   ▼
-                          ┌──────────────────┐
-                          │  REPORT GEN       │
-                          │  (Markdown)       │
-                          └────────┬──────────┘
-                                   │
-                                   ▼
-                                  END
+                        ┌────────────────────────────────────────────┐
+                        │            LangGraph StateGraph            │
+                        │   (compiled w/ checkpoint + interrupt)     │
+                        └───────────────────────┬────────────────────┘
+                                                ▼
+                 ┌────────────────────────────────────────────────┐
+                 │  plan — Chief Agent: guardrail → memory 检索    │
+                 │  → LLM 路由选择专家 (keyword fallback)           │
+                 └───────────────────────┬────────────────────────┘
+                          无专家选中 → END │ 选定专家集
+                                                ▼
+                 ┌────────────────────────────────────────────────┐
+                 │  execute — 专家并行 (asyncio.gather + timeout) │
+                 │  每个 Expert = BaseAgent.run() 完整生命周期:     │
+                 │  hooks(tracing/logging/metrics) → middleware   │
+                 │  stack(retry/logging/error-handling) → 确定性   │
+                 │  工具管线 → LLM 综合 → Pydantic 边界校验         │
+                 └───────────────────────┬────────────────────────┘
+                                                ▼
+                 ┌────────────────────────────────────────────────┐
+                 │  evaluate — LLM-as-judge 三维打分               │
+                 │  (completeness / actionability / data-grounding)│
+                 └───────────────────────┬────────────────────────┘
+                     低于阈值 & 轮次<max   │        通过
+                           ▼              └───────────────┐
+                 ┌──────────────────┐                      │
+                 │ refine — 携带评估 │                      │
+                 │ 反馈重跑低分专家   │                      │
+                 └────────┬─────────┘                      │
+                          └──→ evaluate (循环, ≤2 轮)      ▼
+                                              ┌────────────────────┐
+                                              │ approval — HITL    │
+                                              │ budget≥阈值时中断  │
+                                              │ 等待人工审批        │
+                                              └─────────┬──────────┘
+                                                拒绝 → END │ 批准
+                                                           ▼
+                                              ┌────────────────────┐
+                                              │ report — power 档  │
+                                              │ LLM 综合 + 输出护栏 │
+                                              │ (fallback: 确定性   │
+                                              │  模板报告)          │
+                                              └────────────────────┘
 ```
 
 ---
 
-## Highlights
+## Highlights（每一条都对应真实实现）
 
-- **LangGraph StateGraph 编排** — 以声明式图拓扑驱动 Multi-Agent 协作，支持 Conditional Edge 动态路由（`scope` 关键字意图检测 → 按 scope 激活子集 Agent），编译后单次 `ainvoke()` 完成全链路
-- **因果推断驱动的补贴策略** — 集成 DoWhy 进行因果效应估计（ATE/CATE），避免观察数据偏差；PuLP 整数规划求解最优预算分配，而非启发式规则
-- **工具先行、AI 解读** — 每个 Agent 先调用确定性工具（LightGBM/Funnel/Churn 等）产出结构化结果，再由 LLM 做业务解读和策略综合，兼顾准确性 & 可解释性
-- **三层模型分级** — `fast`（DeepSeek-Chat, 低延迟）、`default`（GPT-4o-mini, 均衡）、`power`（GPT-4o, 高推理），按 Agent 复杂度选层，成本可控
-- **中间件栈** — 可插拔的 `AgentMiddleware` 拦截 LLM/Tool 调用链：`RetryMiddleware`（指数退避）→ `LoggingMiddleware`（耗时追踪）→ `ToolErrorHandlingMiddleware`（错误归一化），与 LangChain 的 `with_fallbacks` 互补
-- **Hook 生命周期** — `PreRunHook / PostRunHook` 在 Agent 执行前后注入 Tracing、Logging、Metrics 等横切关注点，零侵入
-- **持久化记忆系统** — 文件存储 + 自实现 TF-IDF 余弦相似度检索（中英文混合分词），跨 Session 注入历史分析上下文
-- **Pydantic 结构化输出** — 每个 Agent 返回强类型 `AgentResult` 子类（`ProspectResult / SubsidyResult / ...`），自动校验、序列化，Agent 间契约清晰
-
----
-
-## SaaS Features
-
-- **Multi-tenant**: Organization-level data isolation with PostgreSQL
-- **JWT Authentication**: Register/login with token-based access control
-- **Role-based Authorization**: Admin/member roles with endpoint protection
-- **Analysis Persistence**: All analyses saved to database with history and retrieval
-- **Cost Tracking**: Per-agent token usage and cost attribution
-- **OpenTelemetry**: Production-ready tracing and observability
-- **Docker Compose**: One-command full-stack deployment (App + PostgreSQL)
-
-## Technical Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          User Interface Layer                               │
-│                                                                             │
-│   Click + Rich CLI           Interactive Chat           FastAPI + SSE      │
-│   (gpa analyze/chat/kpi)     (scope-aware REPL)      Auth (JWT) + REST API │
-└──────────────────────────────┬──────────────────────────────────────────────┘
-                               │
-┌──────────────────────────────▼──────────────────────────────────────────────┐
-│                        Orchestration Engine                                 │
-│                                                                             │
-│   LangGraph StateGraph ── Conditional Edges ── Scope-based Routing          │
-│   AgentState (TypedDict + Annotated Reducers)                               │
-│   Event Stream (AgentEvent: started/running/completed/failed)               │
-└──────────────────────────────┬──────────────────────────────────────────────┘
-                               │
-┌──────────────────────────────▼──────────────────────────────────────────────┐
-│                           Agent Layer                                       │
-│                                                                             │
-│   BaseAgent (ABC)           Pre/Post Hooks          Middleware Stack        │
-│   ├── OrchestratorAgent     ├── TracingHook          ├── ErrorHandling      │
-│   ├── ProspectAgent         ├── LoggingHook          ├── RetryMiddleware    │
-│   ├── ConversionAgent       └── MetricsHook          └── LoggingMiddleware │
-│   ├── SubsidyAgent                                                          │
-│   ├── RetentionAgent                                                        │
-│   └── AdAgent                                                               │
-└──────────────────────────────┬──────────────────────────────────────────────┘
-                               │
-┌──────────────────────────────▼──────────────────────────────────────────────┐
-│                           Tool Layer                                        │
-│                                                                             │
-│   ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌──────────┐            │
-│   │  Prospect    │ │ Conversion  │ │   Subsidy    │ │  Retention│            │
-│   │ FeatureEngine│ │ FunnelAnlyz │ │ DoWhy Causal │ │ ChurnPred │            │
-│   │ IntentModel  │ │ ReachPlannr │ │ Elasticity   │ │ CohortAnl │            │
-│   │ UserScorer   │ │ SlotAlloc   │ │ BudgetOptim  │ │ Nurture   │            │
-│   │ LTV(BG/NBD)  │ │ CouponDsgn  │ │ Allocatr(PuLP│ │ Winback   │            │
-│   └─────────────┘ └─────────────┘ └─────────────┘ └──────────┘            │
-│   ┌─────────────┐ ┌─────────────────────────────────────────────┐          │
-│   │     Ad      │ │              Common                          │          │
-│   │ RTAStrategy │ │ ExperimentPlatform · DataLoader · Visualizer│          │
-│   │ BidOptimizer│ │ SecureLoader · Attributor · SeasonalAnalyzer│          │
-│   │ CreativeAnl │ └─────────────────────────────────────────────┘          │
-│   │ AudienceAnl │  ToolRegistry (decorator-based dynamic registration)     │
-│   └─────────────┘                                                          │
-└──────────────────────────────┬──────────────────────────────────────────────┘
-                               │
-┌──────────────────────────────▼──────────────────────────────────────────────┐
-│                        Infrastructure Layer                                  │
-│                                                                             │
-│   LLM Factory (OpenAI / DeepSeek / Ollama + Fallback)                      │
-│   Pydantic Settings (env vars, GPA_ prefix)                                │
-│   Memory Manager (JSON persistence + TF-IDF retrieval)                     │
-│   Report Generator (structured Markdown)                                   │
-└──────────────────────────────┬──────────────────────────────────────────────┘
-                               │
-┌──────────────────────────────▼──────────────────────────────────────────────┐
-│                        Database Layer (PostgreSQL)                           │
-│                                                                             │
-│   SQLAlchemy ORM (async)     Alembic Migrations      Multi-tenant Isolation│
-│   Analysis Persistence       User/Org Models          Cost Tracking         │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Agent Matrix
-
-| Agent | Responsibility | Tools | Model Tier |
-|-------|---------------|-------|------------|
-| **Orchestrator** | 意图识别、scope 路由、KPI 聚合、策略综合 | — (pure decision + LLM synthesis) | `power` |
-| **Prospect** | 用户意向预测、用户评分排序、RFM 分群、LTV 预测 | `FeatureEngine` `IntentModel`(LightGBM) `UserScorer` `Segmentor` `LVTPredictor`(BG/NBD) | `default` |
-| **Conversion** | 转化漏斗、触达规划、投放位分配、优惠券设计、多触点归因 | `FunnelAnalyzer` `ReachPlanner` `SlotAllocator` `CouponDesigner` `Attributor` | `default` |
-| **Subsidy** | 因果推断(ATE/CATE)、价格弹性、预算优化、补贴分配 | `CausalInferenceEngine`(DoWhy) `ElasticityEstimator` `BudgetOptimizer`(PuLP) `SubsidyAllocator` | `power` |
-| **Retention** | 流失预警、同期群分析、新客养成、流失召回 | `ChurnPredictor` `CohortAnalyzer` `NurturePlanner` `WinbackPlanner` | `default` |
-| **Ad** | RTA 策略、出价优化、创意分析、受众定向 | `RTAStrategy` `BidOptimizer` `CreativeAnalyzer` `AudienceAnalyzer` | `default` |
+- **LangGraph StateGraph 编排** — `plan → execute → evaluate → (refine | approval | report)` 声明式 DAG；`expert_results` 使用自定义 reducer（按 expert 键替换），refine 循环不会重复累积结果
+- **工具先行、AI 解读** — 每个 Expert 先跑确定性工具（LightGBM / DoWhy / PuLP / BG-NBD）产出结构化结果，LLM 只做业务解读与综合，数据层可审计
+- **Evaluator-Optimizer 质量循环** — LLM-as-judge 三维打分，低于阈值自动携带反馈重跑（≤2 轮）；执行失败的专家直接记 0 分跳过，不浪费重试
+- **Human-in-the-Loop** — `interrupt_before=["approval"]` + PostgreSQL checkpointer，高预算分析暂停等待人工审批，`thread_id` 断点恢复
+- **韧性三件套，全部生效** — 指数退避重试（读自配置）→ 熔断器按 **(provider, model, endpoint) 进程级共享** → 跨厂商 fallback；自我 fallback（同端点）会被自动检测并禁用
+- **Hook + Middleware 生命周期** — `execute_node` 经由 `BaseAgent.run()` 调用每个专家：Tracing/Logging/Metrics hook 与 Retry/Logging/ErrorHandling 中间件栈在真实链路中执行
+- **三层模型分级** — `fast`（评估）/ `default`（规划、专家）/ `power`（最终综合报告）路由到不同模型与温度；tier 配置完全由环境变量驱动
+- **持久化记忆接入主管线** — plan 节点按 org 检索历史分析（ChromaDB 向量检索，无依赖时回退 TF-IDF），命中上下文注入规划与专家 prompt
+- **成本按运行归因** — LangChain callback 逐 agent 记录 token/成本，每次分析开始时重置，报告输出真实 input/output 拆分
+- **输入/输出护栏** — 精确到明确攻击短语的中英文注入检测（误报优先收敛，正常业务用语不拦截）+ 输出脱敏检查
+- **离线评估** — `gpa eval --router` 对内置数据集确定性评估路由命中率（当前 14/14），`gpa eval --full` 跑全链路质量评估
+- **多租户 SaaS** — JWT 认证、org 级数据隔离、分析持久化（PostgreSQL + async SQLAlchemy）、SSE 流式、限流
 
 ---
 
 ## Quick Start
 
-### Prerequisites
-
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) (recommended) or pip
-
-### Docker Compose (Recommended)
+### Docker Compose
 
 ```bash
 cp .env.docker .env
-# Edit .env — set GPA_LLM_API_KEY and JWT_SECRET
+# 编辑 .env —— 至少设置 GPA_LLM_API_KEY 与 GPA_JWT_SECRET
 docker compose up -d
-# API available at http://localhost:8000
-# Docs at http://localhost:8000/docs
+# API: http://localhost:8000  文档: http://localhost:8000/docs
 ```
 
-### Installation
+### 本地开发
 
 ```bash
-# Clone
-git clone https://github.com/yourname/growth-pilot-agent.git
-cd growth-pilot-agent
-
-# Install dependencies
-uv sync
-
-# Or with dev tools
 uv sync --group dev
+cp .env.example .env    # 编辑 .env 设置 GPA_LLM_API_KEY
+
+# 测试（CI 同款环境变量）
+GPA_DEMO_MODE=true GPA_LLM_API_KEY=sk-test-placeholder \
+DB_URL=sqlite+aiosqlite:///./test.db \
+uv run python -m pytest tests/ -v
+
+# Lint + 格式（CI 双重检查）
+uv run ruff check src/ tests/ && uv run ruff format --check src/ tests/
 ```
 
-### Configuration
+### CLI
 
 ```bash
-cp .env.example .env
-# Edit .env — set GPA_LLM_API_KEY at minimum
+# 全链路分析
+uv run gpa analyze --scope full --query "分析本月用户增长瓶颈" --budget 500000
+
+# 指定数据文件（prospect / retention 专家会真实加载）
+uv run gpa analyze --scope prospect --data data/user_behavior.csv
+
+# 离线路由评估（无 LLM、秒级、CI 可跑）
+uv run gpa eval --router
+
+# 全链路质量评估（需要 API key）
+uv run gpa eval --full --limit 5
+
+uv run gpa chat        # 交互模式
+uv run gpa kpi         # KPI 快照
 ```
 
-Key environment variables (all prefixed with `GPA_`):
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GPA_LLM_PROVIDER` | `openai` | LLM provider: `openai` / `deepseek` / `local` |
-| `GPA_LLM_MODEL` | `gpt-4o` | Default model name |
-| `GPA_LLM_API_KEY` | — | API key (omit for demo mode) |
-| `GPA_LLM_BASE_URL` | — | Custom endpoint (e.g. Volcengine Ark) |
-| `GPA_FALLBACK_PROVIDER` | `deepseek` | Fallback provider on failure |
-
-### CLI Usage
-
-```bash
-# Full-pipeline analysis
-uv run gpa analyze --scope full --query "分析本月用户增长情况" --budget 500000
-
-# Scope-specific analysis
-uv run gpa analyze --scope subsidy --query "优化补贴预算分配"
-
-# Interactive chat mode
-uv run gpa chat
-
-# KPI snapshot
-uv run gpa kpi
-
-# Experiment design
-uv run gpa experiment design --metric conversion_rate --budget 50000
-
-# Attribution analysis
-uv run gpa attribution --model shapley
-
-# Seasonal forecast
-uv run gpa seasonal --forecast --calendar
-```
-
-### Makefile Shortcuts
-
-```bash
-make dev          # Quick dev run (full scope, no data)
-make run          # Full run with data/
-make chat         # Interactive REPL
-make test         # Unit tests
-make test-all     # All tests including integration
-make lint         # Ruff lint check
-```
-
----
-
-## API Usage
-
-### Register
+### Web API
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"email": "user@example.com", "password": "pass123", "name": "User", "org_name": "MyOrg"}'
-```
+  -d '{"email":"user@example.com","password":"pass123","name":"User","org_name":"MyOrg"}'
 
-### Login
-
-```bash
-curl -X POST http://localhost:8000/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email": "user@example.com", "password": "pass123"}'
-```
-
-### Analyze
-
-```bash
 curl -X POST http://localhost:8000/api/v1/analyze \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"query": "分析本周用户增长", "scope": "full", "budget": 50000}'
+  -d '{"query":"分析本周用户增长","scope":"full","budget":50000}'
 ```
 
 ---
 
-## Usage Examples
+## Configuration
 
-### 1. Full-Pipeline Growth Analysis
+所有配置走 `GPA_` 前缀环境变量（`src/core/config.py`）：
 
-```bash
-$ uv run gpa analyze --scope full --query "分析本月用户增长瓶颈并给出优化建议" --budget 500000
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GPA_LLM_PROVIDER` | `openai` | `openai` / `deepseek` / `local`（OpenAI 兼容端点均可） |
+| `GPA_LLM_MODEL` | `glm-4.7` | 主模型 |
+| `GPA_LLM_API_KEY` | — | API key（demo 模式可为占位符） |
+| `GPA_LLM_BASE_URL` | bigmodel.cn | OpenAI 兼容端点 |
+| `GPA_FALLBACK_PROVIDER` | `deepseek` | 跨厂商容灾端点 |
+| `GPA_FALLBACK_API_KEY` | — | fallback 专用 key（不设则 fallback 不可用） |
+| `GPA_FALLBACK_BASE_URL` | — | fallback 专用端点 |
+| `GPA_MODEL_TIERS_*` | 见 config | fast/default/power 三档模型路由 |
+| `GPA_QUALITY_THRESHOLD` | `0.7` | 评估低于此分数触发 refine |
+| `GPA_MAX_REFINEMENT_ROUNDS` | `2` | 质量循环上限 |
+| `GPA_BUDGET_APPROVAL_THRESHOLD` | `10000` | 超过此预算触发人工审批 |
+| `GPA_DEMO_MODE` | `false` | 允许占位 key + MemorySaver checkpoint |
 
-Output (abbreviated):
-
-```
-╭─────────────────── GrowthPilot Report ───────────────────╮
-│ # GrowthPilot 增长分析报告                                 │
-│                                                          │
-│ ## KPI 快照                                              │
-│ - 用户总数: 1,250,000                                     │
-│ - 意向模型 AUC: 0.87                                      │
-│ - 整体转化率: 8.5%                                        │
-│ - 预期 ROI: 3.2x                                         │
-│ - 流失风险率: 12.3%                                       │
-│                                                          │
-│ ## 潜客识别                                               │
-│ - 意向评分完成: 32,000 高潜用户                            │
-│ - LTV 预测: Top 20% 用户贡献 65% 收益                     │
-│                                                          │
-│ ## 策略建议                                               │
-│ 1. 加大 RTA 投放预算 15%，CPA 当前低于目标 20%             │
-│ 2. 针对新客 7 日关键窗口设计 push+nurture 组合策略          │
-│ 3. 补贴弹性分析显示低净值用户对 5 元券敏感度最高            │
-╰──────────────────────────────────────────────────────────╯
-
-       Metric        │    Value
-  ───────────────────┼───────────
-     total_users     │ 1,250,000
-     intent_auc      │    0.87
-   conversion_rate   │    8.50%
-    expected_roi     │    3.20
-  churn_risk_ratio   │   12.30%
-       ad_cpa        │  ¥186.00
-```
-
-### 2. Subsidy Experiment Analysis
-
-```bash
-$ uv run gpa analyze --scope subsidy --query "分析补贴的因果效应并优化预算分配" --budget 500000
-```
-
-The Subsidy Agent pipeline:
-1. `CausalInferenceEngine` (DoWhy) estimates ATE of subsidy on conversion
-2. `ElasticityEstimator` computes price sensitivity by segment
-3. `BudgetOptimizer` (PuLP ILP) solves optimal allocation across segments
-4. LLM synthesizes insights + ROI projection
-
-### 3. Seasonal Operation Recommendations
-
-```bash
-$ uv run gpa seasonal --forecast --calendar
-```
-
-```
-╭─────────────────── Seasonal Forecast ───────────────────╮
-│  Period        │ Factor          │ Impact     │ Rec     │
-│ Q4 Week 1-2   │ Double 11       │ +40% demand│ Max acq │
-│ Q4 Week 3-4   │ Year-End Rush   │ +30% demand│ CVR opt │
-│ Q3 Week 3-4   │ Summer Dip      │ -10% demand│ Retain  │
-╰─────────────────────────────────────────────────────────╯
-```
+> **Fallback 说明**：fallback 与主模型相同（provider+model+端点一致）时会被自动禁用并告警——自我容灾没有意义。要启用真实容灾，配置一个不同厂商的 `GPA_FALLBACK_*`。
 
 ---
 
-## Project Structure
+## Agent Matrix
 
-```
-growth-pilot-agent/
-├── pyproject.toml              # Project metadata & dependencies (Hatchling)
-├── Makefile                    # Dev shortcuts
-├── .env.example                # Environment template
-├── deploy/
-│   └── Dockerfile              # Container deployment
-├── docs/
-│   ├── PRD.md                  # Product requirements
-│   ├── DESIGN.md               # Design documents
-│   └── TECHNICAL.md            # Technical deep-dive
-└── src/
-    ├── cli.py                  # Click + Rich CLI entry point
-    ├── core/                   # Framework core
-    │   ├── base.py             # BaseAgent ABC (hooks + middleware + retry)
-    │   ├── config.py           # Pydantic Settings (GPA_ env prefix)
-    │   ├── events.py           # AgentEvent dataclass (execution tracking)
-    │   ├── hooks.py            # PreRunHook / PostRunHook lifecycle
-    │   ├── llm_factory.py      # Multi-provider LLM factory + fallback
-    │   ├── memory.py           # GrowthMemory (categorized insight persistence)
-    │   ├── models.py           # Pydantic structured output models
-    │   └── state.py            # AgentState TypedDict (LangGraph state)
-    ├── agents/                 # Agent implementations
-    │   ├── orchestrator.py     # Scope detection + LLM synthesis
-    │   ├── prospect.py         # User scoring, segmentation, LTV
-    │   ├── conversion.py       # Funnel, coupons, attribution
-    │   ├── subsidy.py          # Causal inference, budget optimization
-    │   ├── retention.py        # Churn, cohort, nurture, winback
-    │   └── ad.py               # RTA, bid, creative, audience
-    ├── graph/
-    │   └── workflow.py         # LangGraph StateGraph builder + runners
-    ├── tools/                  # Deterministic tool implementations
-    │   ├── registry.py         # Decorator-based tool registry
-    │   ├── common/             # Shared tools (data loader, experiment, viz)
-    │   ├── prospect/           # FeatureEngine, IntentModel, UserScorer, LTV
-    │   ├── conversion/         # Funnel, Reach, Slot, Coupon, Attribution
-    │   ├── subsidy/            # DoWhy causal, Elasticity, PuLP optimizer
-    │   ├── retention/          # Churn, Cohort, Nurture, Winback
-    │   └── ad/                 # RTA, Bid, Creative, Audience
-    ├── middleware/              # AgentMiddleware intercept layer
-    │   └── __init__.py         # Retry / Logging / ErrorHandling middleware
-    ├── memory/
-    │   └── manager.py          # TF-IDF semantic memory (extract-store-retrieve-inject)
-    └── report/
-        └── generator.py        # Structured Markdown report builder
-```
+| Expert | 职责 | 工具 | KPIs (标准化输出) |
+|--------|------|------|-------------------|
+| **prospect** | 意向预测、评分排序、RFM 分群、LTV | `FeatureEngine` `IntentModel`(LightGBM) `UserScorer` `UserSegmentor` `LTVPredictor`(BG/NBD) | `total_users` `intent_auc` |
+| **conversion** | 漏斗、触达规划、投放位、优惠券、归因 | `FunnelAnalyzer` `ReachPlanner` `SlotAllocator` `CouponDesigner` `Attributor` | `conversion_rate` `funnel_bottleneck_rate` |
+| **subsidy** | 因果推断(ATE)、弹性、预算优化 | `CausalInferenceEngine`(DoWhy) `ElasticityEstimator` `BudgetOptimizer`(PuLP) `SubsidyAllocator` | `expected_roi` `subsidy_ate` |
+| **retention** | 流失预警、同期群、养成、召回 | `ChurnPredictor` `CohortAnalyzer` `NurturePlanner` `WinbackPlanner` | `churn_high_risk_ratio` `churn_model_auc` |
+| **ad** | RTA、出价、创意、受众 | `RTAStrategy` `BidOptimizer` `CreativeAnalyzer` `AudienceAnalyzer` | `ad_target_cpa` `ad_win_rate` 等 |
+
+每个专家结果携带标准化 `kpis` 字典，workflow 层单点聚合为 `kpi_snapshot`。
 
 ---
 
@@ -436,79 +186,40 @@ growth-pilot-agent/
 
 | Dimension | LangGraph | CrewAI | AutoGen |
 |-----------|-----------|--------|---------|
-| **Graph topology** | Explicit StateGraph with conditional edges | Implicit sequential/hierarchical | Conversation-based |
-| **State management** | TypedDict with reducer annotations | Internal state | Dict passing |
-| **Routing** | Declarative conditional edges per node | Role-based task assignment | Reply-based flow |
-| **Observability** | Node-level event stream + LangSmith | Limited | Limited |
-| **Flexibility** | Fan-out/fan-in, skip nodes, loops | Rigid patterns | Rigid patterns |
+| 拓扑控制 | 显式 StateGraph + 条件边 | 隐式串行/层级 | 会话驱动 |
+| 状态管理 | TypedDict + reducer 注解 | 内部状态 | dict 传递 |
+| 中断恢复 | `interrupt_before` + checkpointer | 有限 | 有限 |
+| 观测性 | 节点级事件 + LangSmith | 有限 | 有限 |
 
-GrowthPilot requires **precise topology control** — 3 agents run in parallel, then sequential fan-in to conversion → retention → synthesis. LangGraph's `StateGraph` with `add_conditional_edges` gives us first-class support for this. CrewAI's role-based paradigm would force us into rigid sequential patterns; AutoGen's conversation-driven model doesn't map well to a data pipeline.
+本项目的 refine 循环、HITL 审批中断、按 expert 键替换的 reducer 都依赖 LangGraph 的一等支持。
 
 ### Why Tools-First, AI-Interpret?
 
-Each Agent follows a strict pattern:
+LightGBM 预测、DoWhy 因果估计、PuLP 优化结果是**数学事实**，不应由 LLM 幻觉生成。LLM 的角色严格限定在：解读工具输出的业务含义、跨专家综合、生成可执行建议。这保证数据层**确定性、可审计**，策略层才有推理弹性。
 
-```
-1. Tool execution → deterministic, testable, structured output (dict)
-2. LLM interpretation → business insight + strategy over tool results
-```
+### Why TypedDict State + Pydantic Boundary?
 
-This is deliberate. LightGBM predictions, DoWhy causal estimates, PuLP optimization results are **mathematically grounded** — they should not be hallucinated by an LLM. The LLM's role is limited to:
-- Interpreting tool outputs in business context
-- Synthesizing cross-agent insights
-- Generating actionable recommendations
+LangGraph 的状态通道需要 `Annotated[..., reducer]` 支持并行合并，Pydantic 模型不原生支持。方案：图状态用 TypedDict + 自定义 reducer，Agent 边界用 Pydantic（`EXPERT_RESULT_MODELS`）做结构化校验，两套体系各司其职。
 
-This architecture ensures the system remains **auditable** and **deterministic** at the data layer while leveraging LLM reasoning at the strategy layer.
+### 演示数据说明（诚实声明）
 
-### Why Multi-Tier Model Routing?
-
-Not all agents need GPT-4o. A `fast` tier (DeepSeek-Chat) handles simple formatting and extraction tasks at ~1/50th the cost. The `power` tier (GPT-4o) is reserved for:
-- **Orchestrator synthesis** — requires strong reasoning across multiple data sources
-- **Subsidy causal interpretation** — nuanced causal effect explanation
-
-The `default` tier (GPT-4o-mini) handles the rest — scoring interpretation, funnel analysis, churn recommendations. This 3-tier approach keeps per-run cost under $0.05 for most queries.
-
-### Why TypedDict State over Pydantic for LangGraph?
-
-LangGraph's state channels use `Annotated[..., operator.add]` reducers for list accumulation (errors, metadata, events). Pydantic models don't natively support this pattern. We use `TypedDict` for the LangGraph state and Pydantic (`AgentResult` hierarchy) for agent return values — bridging via `result_to_state_update()`.
+无外部数据时，管线生成**与特征相关的合成数据**：意向标签由特征线性组合 + sigmoid + Bernoulli 噪声合成（约 8% 基率），LTV 由同一信号驱动对数正态分布。因此演示环境下的 AUC 等指标有信息量但非业务真实值——接入 `--data` 后 prospect/retention 使用真实数据。
 
 ---
 
 ## Tech Stack
 
-| Category | Technology | Purpose |
-|----------|-----------|---------|
-| **Agent Framework** | LangGraph >= 0.2 | StateGraph orchestration, conditional routing |
-| | LangChain Core >= 0.3 | Base abstractions, message types |
-| | LangChain OpenAI >= 1.1 | ChatOpenAI provider |
-| **LLM Providers** | OpenAI (GPT-4o / GPT-4o-mini) | Primary reasoning |
-| | DeepSeek (deepseek-chat) | Cost-efficient fast tier |
-| | Ollama (local) | Offline / air-gapped deployment |
-| **ML / Causal** | LightGBM >= 4.0 | Intent prediction, churn scoring |
-| | DoWhy >= 0.11 | Causal inference (ATE/CATE estimation) |
-| | PuLP >= 2.7 | Integer programming for budget optimization |
-| | scikit-learn >= 1.3 | Feature engineering, model metrics |
-| | SHAP >= 0.44 | Model interpretability |
-| | lifetimes >= 0.11 | BG/NBD + Gamma-Gamma LTV prediction |
-| | statsmodels >= 0.14 | Statistical testing |
-| | scipy >= 1.11 | Optimization, distributions |
-| **Data** | pandas >= 2.0 | Data manipulation |
-| | numpy >= 1.24 | Numerical computation |
-| | Pydantic >= 2.0 | Structured output, validation, settings |
-| **Visualization** | matplotlib >= 3.7 | Charts and plots |
-| | seaborn >= 0.12 | Statistical visualization |
-| **CLI / UI** | Click >= 8.1 | Command-line interface |
-| | Rich >= 13.0 | Terminal formatting (tables, panels, progress) |
-| **Server** | FastAPI >= 0.110 | Web API framework |
-| | uvicorn >= 0.29 | ASGI server |
-| | SSE-Starlette >= 2.0 | Server-sent events streaming |
-| **Build / Dev** | Hatchling | Build backend |
-| | uv | Dependency management |
-| | Ruff >= 0.4 | Linting + formatting |
-| | pytest >= 8.0 | Testing |
+| Category | Technology |
+|----------|-----------|
+| 编排 | LangGraph StateGraph + Checkpointer（PostgreSQL / Memory） |
+| LLM | OpenAI 兼容端点（GLM / GPT / DeepSeek / Ollama），三层 tier 路由 |
+| ML | LightGBM · DoWhy · PuLP · lifetimes(BG/NBD) · SHAP · statsmodels |
+| 服务 | FastAPI · SSE · slowapi · JWT · async SQLAlchemy · Alembic |
+| 记忆 | ChromaDB 向量检索（TF-IDF 无依赖回退） |
+| 质量 | pytest（452 用例）· Ruff（lint + format）· OpenTelemetry |
 
 ---
 
 ## License
 
-This project is licensed under the [MIT License](./LICENSE).
+[MIT](./LICENSE)

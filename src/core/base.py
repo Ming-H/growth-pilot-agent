@@ -1,4 +1,5 @@
 """Agent base class."""
+
 from __future__ import annotations
 
 import json
@@ -142,8 +143,7 @@ class BaseAgent(ABC):
 
             # Serialize result for evaluation (skip internal keys)
             eval_output = {
-                k: v for k, v in result.items()
-                if not k.startswith("_") and k != "errors"
+                k: v for k, v in result.items() if not k.startswith("_") and k != "errors"
             }
             output_text = json.dumps(eval_output, ensure_ascii=False, default=str)
             # Truncate to avoid overly long prompts
@@ -160,7 +160,9 @@ class BaseAgent(ABC):
                 HumanMessage(content=user_msg),
             ]
             response = await eval_llm.ainvoke(messages)
-            content = response.content if isinstance(response.content, str) else str(response.content)
+            content = (
+                response.content if isinstance(response.content, str) else str(response.content)
+            )
 
             # Parse evaluation result
             eval_result = self._parse_json_response(content)
@@ -179,7 +181,8 @@ class BaseAgent(ABC):
 
             result["_quality_score"] = quality_score
             logger.info(
-                "[%s] Quality self-eval: overall=%.2f (completeness=%.2f, actionability=%.2f, data=%.2f)",
+                "[%s] Quality self-eval: overall=%.2f "
+                "(completeness=%.2f, actionability=%.2f, data=%.2f)",
                 self.name,
                 quality_score["overall"],
                 quality_score["completeness"],
@@ -241,8 +244,10 @@ class BaseAgent(ABC):
     @staticmethod
     def _make_mw_handler(mw: Any, next_handler: Any) -> Any:
         """Create a closure that delegates to *mw.wrap_model_call*."""
+
         async def _handler(request: dict[str, Any]) -> Any:
             return await mw.wrap_model_call(request, next_handler)
+
         return _handler
 
     def _parse_json_response(self, text: str) -> dict[str, Any]:
@@ -264,12 +269,3 @@ class BaseAgent(ABC):
                     continue
 
         return {"raw_response": text}
-
-    def _build_prompt_context(self, state: dict[str, Any]) -> str:
-        """Build context string from current state for prompt injection."""
-        parts = [f"用户查询: {state.get('query', '')}"]
-        if state.get("prospect_results"):
-            parts.append("潜客识别结果: 已完成")
-        if state.get("budget"):
-            parts.append(f"可用预算: {state['budget']}")
-        return "\n".join(parts)

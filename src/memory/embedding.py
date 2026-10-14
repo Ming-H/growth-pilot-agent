@@ -4,6 +4,7 @@ Provides a singleton ``OpenAIEmbeddings`` instance via ``get_embeddings()``.
 Falls back to a dummy embedder when ``langchain_openai`` is not installed so
 that the application can still start (with degraded search quality).
 """
+
 from __future__ import annotations
 
 import logging

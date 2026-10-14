@@ -4,6 +4,7 @@ Provides ``store()`` and ``search()`` methods that operate on per-organisation
 ChromaDB collections.  Uses ``OpenAIEmbeddings`` (text-embedding-3-small) for
 embedding generation.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -16,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 try:
     import chromadb  # type: ignore[import-untyped]
-    from chromadb.config import Settings as ChromaSettings  # type: ignore[import-untyped]
 
     _CHROMADB_AVAILABLE = True
 except ImportError:
@@ -43,9 +43,7 @@ class VectorMemoryStore:
 
         self.embeddings = get_embeddings()
         if self.embeddings is None:
-            raise RuntimeError(
-                "Embeddings are not available. Cannot use VectorMemoryStore."
-            )
+            raise RuntimeError("Embeddings are not available. Cannot use VectorMemoryStore.")
 
     # ------------------------------------------------------------------
     # Collection helpers

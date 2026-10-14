@@ -161,12 +161,8 @@ class UserScorer:
         scores = scored_users["composite_score"]
 
         segments["high_intent"] = scored_users[scores >= high_t].copy()
-        segments["medium_intent"] = scored_users[
-            (scores >= med_t) & (scores < high_t)
-        ].copy()
-        segments["low_intent"] = scored_users[
-            (scores >= low_t) & (scores < med_t)
-        ].copy()
+        segments["medium_intent"] = scored_users[(scores >= med_t) & (scores < high_t)].copy()
+        segments["low_intent"] = scored_users[(scores >= low_t) & (scores < med_t)].copy()
         segments["cold"] = scored_users[scores < low_t].copy()
 
         for key, seg in segments.items():

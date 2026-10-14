@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 # Default slot definitions for Didi freight app
 DEFAULT_SLOTS = {
     "金刚位": {
-        "total_capacity": 4,          # max items shown at once
+        "total_capacity": 4,  # max items shown at once
         "impressions_per_day": 500000,
         "avg_ctr": 0.08,
     },
@@ -151,9 +151,7 @@ class SlotAllocator:
                         if isinstance(metrics, dict):
                             lookup[slot][seg] = {
                                 "ctr": float(metrics.get("ctr", 0.05)),
-                                "conversion_rate": float(
-                                    metrics.get("conversion_rate", 0.015)
-                                ),
+                                "conversion_rate": float(metrics.get("conversion_rate", 0.015)),
                             }
             return lookup
 

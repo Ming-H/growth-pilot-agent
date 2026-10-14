@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 import os
-import tempfile
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 import pytest_asyncio
 
 from src.core.config import Settings, get_settings
-from src.graph.state import AnalysisState
-
 
 # ---------------------------------------------------------------------------
 # Settings fixtures
@@ -200,8 +197,10 @@ async def auth_token(test_user):
     """Generate a valid JWT token for the test user."""
     from src.auth.jwt import create_access_token
 
-    return create_access_token({
-        "sub": test_user.id,
-        "org_id": test_user.org_id,
-        "role": test_user.role,
-    })
+    return create_access_token(
+        {
+            "sub": test_user.id,
+            "org_id": test_user.org_id,
+            "role": test_user.role,
+        }
+    )

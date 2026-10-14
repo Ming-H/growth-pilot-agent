@@ -112,7 +112,11 @@ class RTAStrategy:
         for tier, group in tier_groups.items():
             group_wins = [d for d in group if d.get("outcome") == "win"]
             win_rate = len(group_wins) / len(group) if group else 0
-            avg_cpa = np.mean([d["cpa"] for d in group_wins if d.get("cpa")]) if any(d.get("cpa") for d in group_wins) else 0.0
+            avg_cpa = (
+                np.mean([d["cpa"] for d in group_wins if d.get("cpa")])
+                if any(d.get("cpa") for d in group_wins)
+                else 0.0
+            )
             avg_revenue = np.mean([d.get("revenue", 0) for d in group_wins]) if group_wins else 0.0
             segments[tier] = {
                 "count": len(group),
@@ -138,13 +142,15 @@ class RTAStrategy:
                 action = "skip"
                 bid_modifier = 0.0
 
-            rules.append({
-                "segment": f"city_tier_{tier}",
-                "action": action,
-                "bid_modifier": round(bid_modifier, 2),
-                "win_rate": stats["win_rate"],
-                "roi": stats["roi"],
-            })
+            rules.append(
+                {
+                    "segment": f"city_tier_{tier}",
+                    "action": action,
+                    "bid_modifier": round(bid_modifier, 2),
+                    "win_rate": stats["win_rate"],
+                    "roi": stats["roi"],
+                }
+            )
 
         # Segment by intent_score ranges
         intent_groups: dict[str, list[dict]] = {"high": [], "medium": [], "low": []}
@@ -163,7 +169,11 @@ class RTAStrategy:
                 continue
             group_wins = [d for d in group if d.get("outcome") == "win"]
             win_rate = len(group_wins) / len(group) if group else 0
-            avg_cpa = np.mean([d["cpa"] for d in group_wins if d.get("cpa")]) if any(d.get("cpa") for d in group_wins) else 0.0
+            avg_cpa = (
+                np.mean([d["cpa"] for d in group_wins if d.get("cpa")])
+                if any(d.get("cpa") for d in group_wins)
+                else 0.0
+            )
             avg_revenue = np.mean([d.get("revenue", 0) for d in group_wins]) if group_wins else 0.0
             roi = float(avg_revenue / avg_cpa) if avg_cpa > 0 else 0.0
 
@@ -177,13 +187,15 @@ class RTAStrategy:
                 action = "skip"
                 bid_modifier = 0.0
 
-            rules.append({
-                "segment": f"intent_{intent_level}",
-                "action": action,
-                "bid_modifier": round(bid_modifier, 2),
-                "win_rate": round(win_rate, 4),
-                "roi": round(roi, 4),
-            })
+            rules.append(
+                {
+                    "segment": f"intent_{intent_level}",
+                    "action": action,
+                    "bid_modifier": round(bid_modifier, 2),
+                    "win_rate": round(win_rate, 4),
+                    "roi": round(roi, 4),
+                }
+            )
 
         overall_win_rate = len(wins) / total if total > 0 else 0
         overall_revenue = sum(d.get("revenue", 0) for d in wins)
@@ -209,7 +221,9 @@ class RTAStrategy:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _estimate_cvr(self, user_features: dict[str, Any], prospect_scores: dict[str, float]) -> float:
+    def _estimate_cvr(
+        self, user_features: dict[str, Any], prospect_scores: dict[str, float]
+    ) -> float:
         """Estimate conversion rate from user features and prospect scores."""
         base_cvr = prospect_scores.get("conversion_prob", 0.01)
         intent = prospect_scores.get("intent_score", 0.0)
@@ -238,7 +252,9 @@ class RTAStrategy:
 
         return max(0.0, min(estimated_cvr, 0.5))
 
-    def _estimate_user_value(self, user_features: dict[str, Any], prospect_scores: dict[str, float]) -> float:
+    def _estimate_user_value(
+        self, user_features: dict[str, Any], prospect_scores: dict[str, float]
+    ) -> float:
         """Estimate the expected revenue value of a user if they convert."""
         ltv = prospect_scores.get("ltv_estimate", 50.0)
 

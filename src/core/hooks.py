@@ -1,4 +1,5 @@
 """Hook system for agent lifecycle management."""
+
 from __future__ import annotations
 
 import abc
@@ -12,16 +13,14 @@ class PreRunHook(abc.ABC):
     """Hook executed before agent run."""
 
     @abc.abstractmethod
-    async def on_pre_run(self, agent_name: str, state: dict) -> dict:
-        ...
+    async def on_pre_run(self, agent_name: str, state: dict) -> dict: ...
 
 
 class PostRunHook(abc.ABC):
     """Hook executed after agent run."""
 
     @abc.abstractmethod
-    async def on_post_run(self, agent_name: str, result: dict, state: dict) -> dict:
-        ...
+    async def on_post_run(self, agent_name: str, result: dict, state: dict) -> dict: ...
 
 
 class TracingHook(PostRunHook):

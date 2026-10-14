@@ -1,4 +1,5 @@
 """Database connection and session management."""
+
 import logging
 from collections.abc import AsyncGenerator
 
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 class Base(DeclarativeBase):
     """Base class for all ORM models."""
+
     pass
 
 
@@ -53,6 +55,7 @@ def dispose_engine() -> None:
     global _engine, _session_factory
     if _engine is not None:
         import asyncio
+
         try:
             asyncio.get_event_loop().run_until_complete(_engine.dispose())
         except RuntimeError:

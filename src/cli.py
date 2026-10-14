@@ -45,7 +45,9 @@ def _print_errors(errors: list[str]) -> None:
     """Print errors as Rich panels."""
     if not errors:
         return
-    console.print(Panel("\n".join(f"- {e}" for e in errors), title="Warnings", border_style="yellow"))
+    console.print(
+        Panel("\n".join(f"- {e}" for e in errors), title="Warnings", border_style="yellow")
+    )
 
 
 def _print_report(report: str) -> None:
@@ -76,7 +78,12 @@ def main(verbose: bool) -> None:
 
 @main.command()
 @click.option("--data", "-d", default="", help="Path to data file or directory.")
-@click.option("--scope", "-s", default="full", help="Analysis scope (full|prospect|conversion|subsidy|retention|ad|inapp).")
+@click.option(
+    "--scope",
+    "-s",
+    default="full",
+    help="Analysis scope (full|prospect|conversion|subsidy|retention|ad|inapp).",
+)
 @click.option("--budget", "-b", default=0.0, type=float, help="Available budget.")
 @click.option("--query", "-q", default="", help="Natural language query.")
 @click.option("--output", "-o", default="", help="Output file path for the report.")
@@ -88,15 +95,17 @@ def analyze(data: str, scope: str, budget: float, query: str, output: str) -> No
 async def _analyze(data: str, scope: str, budget: float, query: str, output: str) -> None:
     from src.graph.workflow import run_workflow
 
-    console.print(Panel(
-        f"[bold]GrowthPilot Analysis[/bold]\n\n"
-        f"Scope: {scope}\n"
-        f"Data: {data or '(none)'}\n"
-        f"Budget: {budget or '(none)'}\n"
-        f"Query: {query or '(none)'}",
-        title="Configuration",
-        border_style="green",
-    ))
+    console.print(
+        Panel(
+            f"[bold]GrowthPilot Analysis[/bold]\n\n"
+            f"Scope: {scope}\n"
+            f"Data: {data or '(none)'}\n"
+            f"Budget: {budget or '(none)'}\n"
+            f"Query: {query or '(none)'}",
+            title="Configuration",
+            border_style="green",
+        )
+    )
 
     with Progress(
         SpinnerColumn(),
@@ -139,13 +148,19 @@ async def _analyze(data: str, scope: str, budget: float, query: str, output: str
 
 def _print_kpi_table(kpi: dict[str, Any]) -> None:
     """Print KPI snapshot as a Rich table."""
+    # Multipliers/counts render as plain numbers; ratios (0-1) as percentages.
+    non_ratio_keys = {"expected_roi", "total_users", "ad_impressions", "ad_target_cpa"}
+
     table = Table(title="KPI Snapshot", show_header=True, header_style="bold magenta")
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="green")
 
     for key, value in kpi.items():
         if isinstance(value, float):
-            value_str = f"{value:.2%}" if value < 1 else f"{value:.2f}"
+            if key in non_ratio_keys:
+                value_str = f"{value:,.2f}"
+            else:
+                value_str = f"{value:.2%}" if 0 <= value <= 1 else f"{value:,.2f}"
         else:
             value_str = str(value)
         table.add_row(key, value_str)
@@ -170,13 +185,15 @@ def experiment() -> None:
 @click.option("--budget", "-b", default=0.0, type=float, help="Experiment budget.")
 def experiment_design(data: str, metric: str, budget: float) -> None:
     """Design an A/B test experiment."""
-    console.print(Panel(
-        f"[bold]Experiment Design[/bold]\n\n"
-        f"Data: {data or '(none)'}\n"
-        f"Primary metric: {metric}\n"
-        f"Budget: {budget}",
-        border_style="blue",
-    ))
+    console.print(
+        Panel(
+            f"[bold]Experiment Design[/bold]\n\n"
+            f"Data: {data or '(none)'}\n"
+            f"Primary metric: {metric}\n"
+            f"Budget: {budget}",
+            border_style="blue",
+        )
+    )
 
     # Generate a sample experiment design
     design = _generate_experiment_design(metric, budget)
@@ -208,12 +225,14 @@ def _generate_experiment_design(metric: str, budget: float) -> dict[str, Any]:
 @click.option("--metric", "-m", default="conversion_rate", help="Primary metric.")
 def experiment_analyze(data: str, metric: str) -> None:
     """Analyze experiment results."""
-    console.print(Panel(
-        f"[bold]Experiment Analysis[/bold]\n\n"
-        f"Data: {data or '(none)'}\n"
-        f"Primary metric: {metric}",
-        border_style="blue",
-    ))
+    console.print(
+        Panel(
+            f"[bold]Experiment Analysis[/bold]\n\n"
+            f"Data: {data or '(none)'}\n"
+            f"Primary metric: {metric}",
+            border_style="blue",
+        )
+    )
 
     # Placeholder analysis result
     result = {
@@ -233,19 +252,26 @@ def experiment_analyze(data: str, metric: str) -> None:
 
 
 @main.command()
-@click.option("--model", "-m", default="last_touch", help="Attribution model (last_touch|first_touch|linear|shapley).")
+@click.option(
+    "--model",
+    "-m",
+    default="last_touch",
+    help="Attribution model (last_touch|first_touch|linear|shapley).",
+)
 @click.option("--data", "-d", default="", help="Path to attribution data.")
 def attribution(model: str, data: str) -> None:
     """Run attribution analysis."""
-    console.print(Panel(
-        f"[bold]Attribution Analysis[/bold]\n\n"
-        f"Model: {model}\n"
-        f"Data: {data or '(none)'}",
-        border_style="green",
-    ))
+    console.print(
+        Panel(
+            f"[bold]Attribution Analysis[/bold]\n\nModel: {model}\nData: {data or '(none)'}",
+            border_style="green",
+        )
+    )
 
     # Placeholder attribution result
-    table = Table(title=f"Attribution Results ({model})", show_header=True, header_style="bold magenta")
+    table = Table(
+        title=f"Attribution Results ({model})", show_header=True, header_style="bold magenta"
+    )
     table.add_column("Channel", style="cyan")
     table.add_column("Attribution Weight", style="green")
     table.add_column("Revenue Contribution", style="yellow")
@@ -294,16 +320,18 @@ def seasonal(forecast: bool, calendar: bool) -> None:
         console.print(table)
 
     if calendar:
-        console.print(Panel(
-            "[bold]Upcoming Calendar Events[/bold]\n\n"
-            "- Double 11 (Nov 11): Major e-commerce event\n"
-            "- Mid-Year Sale (Jun 18): 618 promotion\n"
-            "- Spring Festival (Jan/Feb): Logistics slowdown\n"
-            "- National Day (Oct 1-7): Holiday shipping peak\n"
-            "- Year-End Clearance (Dec): Inventory movement",
-            title="Seasonal Calendar",
-            border_style="green",
-        ))
+        console.print(
+            Panel(
+                "[bold]Upcoming Calendar Events[/bold]\n\n"
+                "- Double 11 (Nov 11): Major e-commerce event\n"
+                "- Mid-Year Sale (Jun 18): 618 promotion\n"
+                "- Spring Festival (Jan/Feb): Logistics slowdown\n"
+                "- National Day (Oct 1-7): Holiday shipping peak\n"
+                "- Year-End Clearance (Dec): Inventory movement",
+                title="Seasonal Calendar",
+                border_style="green",
+            )
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -339,10 +367,13 @@ def kpi() -> None:
 
     console.print(table)
 
-    console.print(Panel(
-        "[dim]Note: Showing sample KPI data. Connect to live data source for real metrics.[/dim]",
-        border_style="dim",
-    ))
+    console.print(
+        Panel(
+            "[dim]Note: Showing sample KPI data. "
+            "Connect to live data source for real metrics.[/dim]",
+            border_style="dim",
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -354,16 +385,18 @@ def kpi() -> None:
 @click.option("--scope", "-s", default="full", help="Default analysis scope.")
 def chat(scope: str) -> None:
     """Interactive chat mode for growth analysis queries."""
-    console.print(Panel(
-        "[bold]GrowthPilot Interactive Mode[/bold]\n\n"
-        f"Default scope: {scope}\n"
-        "Type your query and press Enter.\n"
-        "Type 'quit' or 'exit' to stop.\n"
-        "Type 'scope <name>' to change scope.\n"
-        "Type 'kpi' to see current KPI snapshot.",
-        title="Welcome",
-        border_style="green",
-    ))
+    console.print(
+        Panel(
+            "[bold]GrowthPilot Interactive Mode[/bold]\n\n"
+            f"Default scope: {scope}\n"
+            "Type your query and press Enter.\n"
+            "Type 'quit' or 'exit' to stop.\n"
+            "Type 'scope <name>' to change scope.\n"
+            "Type 'kpi' to see current KPI snapshot.",
+            title="Welcome",
+            border_style="green",
+        )
+    )
 
     current_scope = scope
 
@@ -393,20 +426,24 @@ def chat(scope: str) -> None:
                 current_scope = new_scope
                 console.print(f"[green]Scope changed to: {current_scope}[/green]")
             else:
-                console.print(f"[red]Invalid scope. Valid options: {', '.join(sorted(valid_scopes))}[/red]")
+                console.print(
+                    f"[red]Invalid scope. Valid options: {', '.join(sorted(valid_scopes))}[/red]"
+                )
             continue
 
         if user_input.lower() == "help":
-            console.print(Panel(
-                "Available commands:\n"
-                "- Any natural language query: runs analysis\n"
-                "- 'scope <name>': change analysis scope\n"
-                "- 'kpi': show current KPI snapshot\n"
-                "- 'quit' / 'exit': exit interactive mode\n"
-                "- 'help': show this message",
-                title="Help",
-                border_style="blue",
-            ))
+            console.print(
+                Panel(
+                    "Available commands:\n"
+                    "- Any natural language query: runs analysis\n"
+                    "- 'scope <name>': change analysis scope\n"
+                    "- 'kpi': show current KPI snapshot\n"
+                    "- 'quit' / 'exit': exit interactive mode\n"
+                    "- 'help': show this message",
+                    title="Help",
+                    border_style="blue",
+                )
+            )
             continue
 
         # Run analysis
@@ -498,14 +535,129 @@ def info() -> None:
     console.print(agent_table)
 
     if not settings.llm_api_key:
-        console.print(Panel(
-            "[yellow]No API key configured. Running in demo/mock mode.[/yellow]\n\n"
-            "To enable full functionality:\n"
-            "1. Set GPA_LLM_API_KEY in .env file\n"
-            "2. Or export GPA_LLM_API_KEY=your-key",
-            title="Demo Mode",
-            border_style="yellow",
-        ))
+        console.print(
+            Panel(
+                "[yellow]No API key configured. Running in demo/mock mode.[/yellow]\n\n"
+                "To enable full functionality:\n"
+                "1. Set GPA_LLM_API_KEY in .env file\n"
+                "2. Or export GPA_LLM_API_KEY=your-key",
+                title="Demo Mode",
+                border_style="yellow",
+            )
+        )
+
+
+# ---------------------------------------------------------------------------
+# eval command (offline quality evaluation)
+# ---------------------------------------------------------------------------
+
+
+@main.command("eval")
+@click.option(
+    "--router",
+    "mode",
+    flag_value="router",
+    default=True,
+    help="Offline deterministic router evaluation (no LLM, CI-safe).",
+)
+@click.option(
+    "--full",
+    "mode",
+    flag_value="full",
+    help="Full pipeline evaluation per sample (requires LLM API key).",
+)
+@click.option("--limit", "-l", default=0, type=int, help="Max samples (0 = all).")
+@click.option("--output", "-o", default="", help="Write the markdown report to a file.")
+def eval_cli(mode: str, limit: int, output: str) -> None:
+    """Evaluate routing / pipeline quality against the built-in eval dataset."""
+    if mode == "router":
+        _run_router_eval(limit, output)
+    else:
+        _run_async(_run_full_eval(limit, output))
+
+
+def _run_router_eval(limit: int, output: str) -> None:
+    """Deterministic router eval: intent-classifier hits vs expected scope."""
+    from src.evals.dataset import EvalDataset
+    from src.graph.nodes import _intent_classify
+
+    dataset = EvalDataset.from_builtin()
+    samples = dataset.samples[: limit or None]
+
+    table = Table(title="Router Evaluation (deterministic, no LLM)", show_header=True)
+    table.add_column("Sample", style="cyan", max_width=32)
+    table.add_column("Expected", style="green")
+    table.add_column("Selected", style="white")
+    table.add_column("Hit", justify="center")
+
+    hits = 0
+    for s in samples:
+        selected = _intent_classify(s.input_query)
+        expected = s.scope if s.scope != "full" else None
+        if expected is None:
+            ok = len(selected) > 0  # full-scope samples: any non-empty routing
+        else:
+            ok = expected in selected
+        hits += ok
+        table.add_row(
+            s.id or s.input_query[:28],
+            s.scope,
+            ",".join(selected),
+            "[green]✓[/green]" if ok else "[red]✗[/red]",
+        )
+
+    rate = hits / len(samples) if samples else 0.0
+    console.print(table)
+    console.print(f"Router accuracy: [bold]{rate:.0%}[/bold] ({hits}/{len(samples)})")
+
+    if output:
+        Path(output).write_text(
+            f"# Router Evaluation\n\nAccuracy: {rate:.0%} ({hits}/{len(samples)})\n",
+            encoding="utf-8",
+        )
+        console.print(f"[green]Saved to {output}[/green]")
+
+
+async def _run_full_eval(limit: int, output: str) -> None:
+    """Full pipeline eval: run the graph per sample, score expected keys + judge."""
+    import time as _time
+
+    from src.evals.dataset import EvalDataset
+    from src.evals.evaluator import AgentEvaluator, EvalResult
+    from src.evals.report import EvalReport
+    from src.graph.workflow import run_workflow
+
+    dataset = EvalDataset.from_builtin()
+    samples = dataset.samples[: limit or None]
+    evaluator = AgentEvaluator()
+
+    results: list[EvalResult] = []
+    for s in samples:
+        start = _time.perf_counter()
+        state = await run_workflow(query=s.input_query, scope="", budget=0)
+        elapsed = _time.perf_counter() - start
+
+        expert_results = state.get("expert_results", {})
+        actual = expert_results.get(s.agent_name, {}) if isinstance(expert_results, dict) else {}
+        result = await evaluator.evaluate_agent_run(
+            agent_name=s.agent_name,
+            input_query=s.input_query,
+            actual_output=actual,
+            expected_output=s.reference_answer,
+            expected_keys=s.expected_keys,
+            latency_seconds=elapsed,
+        )
+        results.append(result)
+        console.print(f"[cyan]{s.id}[/cyan] overall={result.overall_score:.2f}")
+
+    report = EvalReport(results)
+    markdown = report.to_markdown()
+    console.print(Panel(markdown[:1500], title="Evaluation Report"))
+
+    out_path = Path(output) if output else Path("reports/eval_report.md")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(markdown, encoding="utf-8")
+    console.print(f"[green]Full report saved to {out_path}[/green]")
 
 
 # ---------------------------------------------------------------------------

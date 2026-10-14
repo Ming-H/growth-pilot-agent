@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "growth-pilot-agent"
-version = "6.0.0"
+version = "7.0.0"
 description = "Production-grade multi-agent user growth platform"
 requires-python = ">=3.12"
 
@@ -90,7 +90,13 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]
-ignore = ["E741"]
+# E741: `l` is a fine loop var in short comprehensions
+# N803/N806: X/y uppercase is the sklearn/ML convention for features & labels
+ignore = ["E741", "N806", "N803"]
+
+[tool.ruff.lint.per-file-ignores]
+# Builtin eval samples are long Chinese strings; wrapping would hurt readability
+"src/evals/dataset.py" = ["E501"]
 
 [dependency-groups]
 dev = [

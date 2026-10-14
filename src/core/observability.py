@@ -4,6 +4,7 @@ Supports LangSmith tracing for Multi-Agent execution visualization
 alongside existing OpenTelemetry instrumentation, cost tracking,
 and distributed tracing.
 """
+
 from __future__ import annotations
 
 import logging
@@ -144,14 +145,16 @@ class CostTracker:
         """Record token usage for a single LLM call."""
         prices = self.PRICING.get(model, {"input": 0.50, "output": 1.50})
         cost = (input_tokens * prices["input"] + output_tokens * prices["output"]) / 1_000_000
-        self._records.append({
-            "agent": agent,
-            "model": model,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "cost_usd": round(cost, 6),
-            "timestamp": time.time(),
-        })
+        self._records.append(
+            {
+                "agent": agent,
+                "model": model,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cost_usd": round(cost, 6),
+                "timestamp": time.time(),
+            }
+        )
 
     @property
     def total_cost(self) -> float:
@@ -163,7 +166,9 @@ class CostTracker:
 
     def report(self) -> dict[str, Any]:
         """Generate a cost summary report."""
-        by_agent: dict[str, dict[str, Any]] = defaultdict(lambda: {"cost_usd": 0.0, "calls": 0, "tokens": 0})
+        by_agent: dict[str, dict[str, Any]] = defaultdict(
+            lambda: {"cost_usd": 0.0, "calls": 0, "tokens": 0}
+        )
         for r in self._records:
             by_agent[r["agent"]]["cost_usd"] += r["cost_usd"]
             by_agent[r["agent"]]["calls"] += 1
@@ -184,6 +189,7 @@ class CostTracker:
 
 def traced(name: str):
     """Decorator to wrap an async function with an OTEL span."""
+
     def decorator(func):
         async def wrapper(*args, **kwargs):
             with tracer.start_as_current_span(name) as span:
@@ -197,5 +203,7 @@ def traced(name: str):
                     span.set_attribute("error.type", type(e).__name__)
                     span.set_attribute("error.message", str(e)[:200])
                     raise
+
         return wrapper
+
     return decorator
