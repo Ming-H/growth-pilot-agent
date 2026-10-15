@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [8.0.0] - 2026-10-16
+
+### Agent-led refactor — Chief Agent tool-calling loop as the primary paradigm
+
+The orchestration paradigm flips from workflow-led (fixed DAG, bounded LLM
+decision points) to classic **agent-led**: the LLM dynamically decides which
+expert tools to invoke, in which order, whether results suffice, and when to
+produce the final report. The fixed DAG remains available as `--mode workflow`
+for deterministic degradation.
+
+### Added
+
+- **`src/agent/` package** — the agent-led mode:
+  - `state.py`: `AgentState` extends `AnalysisState` with a LangGraph
+    `messages` channel (`add_messages` reducer) for the full conversation
+    (tool calls, tool results, feedback).
+  - `tools.py`: Agent-as-Tool — the five domain experts plus `search_memory`
+    rendered as tool specs (Pydantic arg schemas + state-aware handlers).
+    `bind_tools` gets the schemas; execution dispatches with graph-state
+    access. The LLM receives compact digests (kpis + summary); full validated
+    results merge into state via the reducer.
+  - `chief.py`: `chief_agent_node` (power-tier LLM + bound tools), parallel
+    `agent_tools_node`, `evaluate_gate_node` (LLM-as-judge with bounded
+    feedback re-entry), approval and report nodes (output guardrail +
+    per-run cost + memory write-back closing the memory loop).
+  - `graph.py`: `guard → agent ⇄ tools → evaluate_gate → approval → report`
+    compiled with checkpointer and `interrupt_before=["approval"]` (HITL
+    preserved). LLM unavailability fails cleanly with an actionable message
+    suggesting `--mode workflow`.
+- **`GPA_ORCHESTRATION_MODE`** setting (`agent` default) and CLI
+  `gpa analyze --mode agent|workflow`.
+- 17 new tests (`tests/test_agent/`): tool schemas/dispatch, loop routing,
+  quality-gate feedback, failed-expert error recording, mocked end-to-end
+  loop, mode dispatch (469 total).
+
+### Fixed
+
+- `AsyncPostgresSaver.from_conn_string` returns an async context manager —
+  calling `.setup()` on it crashed; it is now entered explicitly with a
+  module-level reference keeping it alive (was silently degrading to
+  MemorySaver in production mode).
+
+### Changed
+
+- README/CLAUDE.md rewritten for the agent-led default with the workflow DAG
+  documented as the fallback mode; version bumped to 8.0.0.
+
+---
+
 ## [7.0.0] - 2026-10-14
 
 ### Integrity release — 让每个宣称的机制真实生效

@@ -24,7 +24,8 @@ uv run ruff check src/ tests/
 uv run ruff format --check src/ tests/
 
 # CLI (entry point: src/cli.py, installed as `gpa`)
-uv run gpa analyze --scope full --query "分析本月用户增长" --budget 500000
+uv run gpa analyze --scope full --query "分析本月用户增长" --budget 500000   # agent mode default
+uv run gpa analyze --mode workflow --scope full --query "..."              # fixed DAG
 uv run gpa eval --router          # offline deterministic router eval (no LLM)
 
 # Web API (FastAPI, http://localhost:8000/docs)
@@ -40,15 +41,30 @@ make docker-up
 
 ## Architecture
 
-### Execution flow (LangGraph StateGraph)
+### Execution flow (two orchestration modes)
 
-Both the CLI and web API funnel into `run_workflow()` (`src/graph/workflow.py`, a backward-compat shim) → `run_analysis()` (`src/graph/graph.py`), which resets the per-run cost tracker, compiles the graph with a checkpointer and `interrupt_before=["approval"]`:
+`run_workflow()` (`src/graph/workflow.py`) dispatches on `Settings.orchestration_mode` (default **agent**) and both modes return the same result contract:
+
+**Agent mode (default, v8)** — `src/agent/graph.py::run_agent_analysis`:
+```
+guard → agent ⇄ tools → evaluate_gate ─┬→ agent (feedback, ≤ max_refinement_rounds)
+                                      └→ approval (interrupt) → report → END
+```
+- `chief_agent_node` (`src/agent/chief.py`): power-tier LLM with `bind_tools`; the LLM decides which expert tools to call, in what order, and when to answer. Messages live in an `add_messages` channel (`src/agent/state.py::AgentState`).
+- `agent_tools_node`: executes tool calls in parallel worker threads; experts run via `BaseAgent.run()` (full hook lifecycle). The LLM receives compact digests (kpis + summary); full validated results merge into `expert_results` via the reducer.
+- Tools (`src/agent/tools.py`): `run_{prospect,conversion,subsidy,retention,ad}_analysis` + `search_memory`. Specs are (schema, state-aware handler) pairs — `to_langchain_tools` renders schemas; `execute_tool_call_async` dispatches with graph-state access.
+- `evaluate_gate_node`: LLM-as-judge on the final answer; low scores inject feedback back into the loop (bounded).
+- `agent_report_node`: report = last AIMessage through the output guardrail + memory write-back.
+- If the LLM is unavailable the agent loop fails **cleanly** (no honest fallback in agent-led mode) and suggests `--mode workflow`.
+
+**Workflow mode (fallback)** — `src/graph/graph.py::run_analysis`:
 
 ```
 plan → execute → evaluate ─┬→ refine → evaluate        (quality loop, ≤ max_refinement_rounds)
                            ├→ approval → report → END  (human-in-the-loop, paused via interrupt)
                            └→ report → END
 ```
+LLM autonomy is bounded to four decision points (routing / synthesis / judging / report); routing falls back to keyword matching.
 
 - **State:** `AnalysisState` TypedDict (`src/graph/state.py`). `expert_results` uses a custom `_replace_by_expert` reducer so a refine-round result *replaces* (not appends) the same expert's earlier result; `execution_errors` uses `operator.add`. TypedDict (not Pydantic) is deliberate — LangGraph reducers need `Annotated` support.
 - **Nodes:** pure functions in `src/graph/nodes.py` returning partial state updates. Routers (`_route_after_*`) live in `graph.py`.

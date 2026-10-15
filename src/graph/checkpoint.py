@@ -30,6 +30,10 @@ try:
 except ImportError:
     AsyncPostgresSaver = None  # type: ignore[assignment,misc]
 
+# Keeps the async context manager of a live Postgres saver alive for the
+# process lifetime (see get_checkpointer).
+_pg_saver_cm = None
+
 
 async def get_checkpointer():  # noqa: ANN202 – return type depends on backend
     """Create and return an initialised checkpointer.
@@ -60,8 +64,15 @@ async def get_checkpointer():  # noqa: ANN202 – return type depends on backend
     conn_string = settings.db_url.replace("+asyncpg", "")
 
     try:
-        checkpointer = AsyncPostgresSaver.from_conn_string(conn_string)
+        # ``from_conn_string`` returns an async context manager. The saver
+        # must outlive this function (process-level lifetime), so enter the
+        # context manually and keep a module-level reference to prevent
+        # premature cleanup by the garbage collector.
+        cm = AsyncPostgresSaver.from_conn_string(conn_string)
+        checkpointer = await cm.__aenter__()
         await checkpointer.setup()
+        global _pg_saver_cm
+        _pg_saver_cm = cm
         logger.info(
             "[checkpoint] AsyncPostgresSaver initialised (db_url=%s)", conn_string.split("@")[-1]
         )

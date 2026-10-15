@@ -9,73 +9,66 @@
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-%E2%89%A50.2-green?logo=langchain&logoColor=white)](https://github.com/langchain-ai/langgraph)
 [![FastAPI](https://img.shields.io/badge/FastAPI-%E2%89%A50.110-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Tests](https://img.shields.io/badge/tests-452%20passed-brightgreen)](./tests)
+[![Tests](https://img.shields.io/badge/tests-469%20passed-brightgreen)](./tests)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 </div>
 
 ---
 
-## Architecture Overview
+## Architecture Overview（v8：Agent 主导）
 
 ```
-                        ┌────────────────────────────────────────────┐
-                        │            LangGraph StateGraph            │
-                        │   (compiled w/ checkpoint + interrupt)     │
-                        └───────────────────────┬────────────────────┘
-                                                ▼
-                 ┌────────────────────────────────────────────────┐
-                 │  plan — Chief Agent: guardrail → memory 检索    │
-                 │  → LLM 路由选择专家 (keyword fallback)           │
-                 └───────────────────────┬────────────────────────┘
-                          无专家选中 → END │ 选定专家集
-                                                ▼
-                 ┌────────────────────────────────────────────────┐
-                 │  execute — 专家并行 (asyncio.gather + timeout) │
-                 │  每个 Expert = BaseAgent.run() 完整生命周期:     │
-                 │  hooks(tracing/logging/metrics) → middleware   │
-                 │  stack(retry/logging/error-handling) → 确定性   │
-                 │  工具管线 → LLM 综合 → Pydantic 边界校验         │
-                 └───────────────────────┬────────────────────────┘
-                                                ▼
-                 ┌────────────────────────────────────────────────┐
-                 │  evaluate — LLM-as-judge 三维打分               │
-                 │  (completeness / actionability / data-grounding)│
-                 └───────────────────────┬────────────────────────┘
-                     低于阈值 & 轮次<max   │        通过
-                           ▼              └───────────────┐
-                 ┌──────────────────┐                      │
-                 │ refine — 携带评估 │                      │
-                 │ 反馈重跑低分专家   │                      │
-                 └────────┬─────────┘                      │
-                          └──→ evaluate (循环, ≤2 轮)      ▼
-                                              ┌────────────────────┐
-                                              │ approval — HITL    │
-                                              │ budget≥阈值时中断  │
-                                              │ 等待人工审批        │
-                                              └─────────┬──────────┘
-                                                拒绝 → END │ 批准
-                                                           ▼
-                                              ┌────────────────────┐
-                                              │ report — power 档  │
-                                              │ LLM 综合 + 输出护栏 │
-                                              │ (fallback: 确定性   │
-                                              │  模板报告)          │
-                                              └────────────────────┘
-```
+                      ┌──────────────────────────────────────────────┐
+                      │        Chief Agent（LLM 工具调用循环）         │
+                      │                                              │
+                      │   GLM-4.7 + bind_tools —— LLM 动态决定：      │
+                      │   · 调用哪些专家工具、什么顺序                 │
+                      │   · 观察结果后是否需要补充分析                  │
+                      │   · 结果是否足以回答、何时输出报告              │
+                      └──────────────────────┬───────────────────────┘
+                          tool_calls         │        最终回答
+                     ┌──────────────────────▼──────────┐
+                     │           TOOLS（工具层）         │
+                     │  run_prospect_analysis  ┐        │
+                     │  run_conversion_analysis │ 每个专家仍走 │
+                     │  run_subsidy_analysis    │ BaseAgent.run() │
+                     │  run_retention_analysis  │ 完整生命周期 │
+                     │  run_ad_analysis         │ (hooks+中间件) │
+                     │  search_memory（跨会话记忆检索）┘        │
+                     │  · 确定性 ML 管线 → Pydantic 校验          │
+                     │  · LLM 收到精简 digest，完整结果入 state    │
+                     └──────────────────────┬──────────┘
+                                            ▼
+                      ┌──────────────────────────────────────────────┐
+                      │  质量门（LLM-as-judge）                        │
+                      │  低分 → 反馈注入回 Agent（有界轮次 ≤2）         │
+                      └──────────────────────┬───────────────────────┘
+                                           ▼
+                      ┌──────────────────────────────────────────────┐
+                      │  人工审批（budget ≥ 阈值时 interrupt 中断，     │
+                      │  checkpoint 持久化，thread_id 断点恢复）        │
+                      └──────────────────────┬───────────────────────┘
+                                           ▼
+                      ┌──────────────────────────────────────────────┐
+                      │  报告 = Agent 最终消息（输出护栏）+ 记忆回写      │
+                      └──────────────────────────────────────────────┘
+
+  备选模式 --mode workflow：固定 plan→execute→evaluate DAG（确定性路由，
+  不依赖 LLM 决策，作为 LLM 不可用时的降级方案保留）
 
 ---
 
 ## Highlights（每一条都对应真实实现）
 
-- **LangGraph StateGraph 编排** — `plan → execute → evaluate → (refine | approval | report)` 声明式 DAG；`expert_results` 使用自定义 reducer（按 expert 键替换），refine 循环不会重复累积结果
+- **经典 Agent 主导编排** — Chief Agent 原生 tool-calling 循环（GLM-4.7 `bind_tools`）：LLM 动态决定调用哪些专家工具、什么顺序、结果是否充分、何时产出报告；备选 `--mode workflow` 固定 DAG 作为 LLM 不可用时的确定性降级
 - **工具先行、AI 解读** — 每个 Expert 先跑确定性工具（LightGBM / DoWhy / PuLP / BG-NBD）产出结构化结果，LLM 只做业务解读与综合，数据层可审计
 - **Evaluator-Optimizer 质量循环** — LLM-as-judge 三维打分，低于阈值自动携带反馈重跑（≤2 轮）；执行失败的专家直接记 0 分跳过，不浪费重试
 - **Human-in-the-Loop** — `interrupt_before=["approval"]` + PostgreSQL checkpointer，高预算分析暂停等待人工审批，`thread_id` 断点恢复
 - **韧性三件套，全部生效** — 指数退避重试（读自配置）→ 熔断器按 **(provider, model, endpoint) 进程级共享** → 跨厂商 fallback；自我 fallback（同端点）会被自动检测并禁用
 - **Hook + Middleware 生命周期** — `execute_node` 经由 `BaseAgent.run()` 调用每个专家：Tracing/Logging/Metrics hook 与 Retry/Logging/ErrorHandling 中间件栈在真实链路中执行
 - **三层模型分级** — `fast`（评估）/ `default`（规划、专家）/ `power`（最终综合报告）路由到不同模型与温度；tier 配置完全由环境变量驱动
-- **持久化记忆接入主管线** — plan 节点按 org 检索历史分析（ChromaDB 向量检索，无依赖时回退 TF-IDF），命中上下文注入规划与专家 prompt
+- **记忆闭环** — Agent 通过 `search_memory` 工具按 org 检索历史分析（ChromaDB 向量 / TF-IDF 回退），运行结束自动回写新分析；跨会话上下文在 Agent 的自主决策中使用
 - **成本按运行归因** — LangChain callback 逐 agent 记录 token/成本，每次分析开始时重置，报告输出真实 input/output 拆分
 - **输入/输出护栏** — 精确到明确攻击短语的中英文注入检测（误报优先收敛，正常业务用语不拦截）+ 输出脱敏检查
 - **离线评估** — `gpa eval --router` 对内置数据集确定性评估路由命中率（当前 14/14），`gpa eval --full` 跑全链路质量评估
@@ -112,8 +105,11 @@ uv run ruff check src/ tests/ && uv run ruff format --check src/ tests/
 ### CLI
 
 ```bash
-# 全链路分析
+# Agent 主导全链路分析（默认模式：LLM 动态编排专家工具）
 uv run gpa analyze --scope full --query "分析本月用户增长瓶颈" --budget 500000
+
+# 固定 DAG 模式（确定性路由降级方案）
+uv run gpa analyze --scope full --mode workflow --query "分析本月用户增长瓶颈"
 
 # 指定数据文件（prospect / retention 专家会真实加载）
 uv run gpa analyze --scope prospect --data data/user_behavior.csv
@@ -161,6 +157,7 @@ curl -X POST http://localhost:8000/api/v1/analyze \
 | `GPA_MAX_REFINEMENT_ROUNDS` | `2` | 质量循环上限 |
 | `GPA_BUDGET_APPROVAL_THRESHOLD` | `10000` | 超过此预算触发人工审批 |
 | `GPA_DEMO_MODE` | `false` | 允许占位 key + MemorySaver checkpoint |
+| `GPA_ORCHESTRATION_MODE` | `agent` | `agent`（LLM 工具循环）/ `workflow`（固定 DAG） |
 
 > **Fallback 说明**：fallback 与主模型相同（provider+model+端点一致）时会被自动禁用并告警——自我容灾没有意义。要启用真实容灾，配置一个不同厂商的 `GPA_FALLBACK_*`。
 

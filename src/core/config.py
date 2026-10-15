@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     # Expert model configuration
     expert_model_tier: str = "default"
 
+    # Orchestration paradigm:
+    #   "agent"    — Chief Agent tool-calling loop (LLM decides tools/ordering)
+    #   "workflow" — fixed plan→execute→evaluate DAG (deterministic routing)
+    orchestration_mode: Literal["agent", "workflow"] = "agent"
+
     # Graph configuration
     max_refinement_rounds: int = 2
     quality_threshold: float = 0.7

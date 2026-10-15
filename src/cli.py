@@ -87,17 +87,29 @@ def main(verbose: bool) -> None:
 @click.option("--budget", "-b", default=0.0, type=float, help="Available budget.")
 @click.option("--query", "-q", default="", help="Natural language query.")
 @click.option("--output", "-o", default="", help="Output file path for the report.")
-def analyze(data: str, scope: str, budget: float, query: str, output: str) -> None:
-    """Run the full growth analysis pipeline."""
-    _run_async(_analyze(data, scope, budget, query, output))
+@click.option(
+    "--mode",
+    "-m",
+    "mode",
+    default="",
+    type=click.Choice(["", "agent", "workflow"]),
+    help="Orchestration mode: agent (LLD-led tool loop, default) or workflow (fixed DAG).",
+)
+def analyze(data: str, scope: str, budget: float, query: str, output: str, mode: str) -> None:
+    """Run the growth analysis pipeline (agent-led by default)."""
+    _run_async(_analyze(data, scope, budget, query, output, mode))
 
 
-async def _analyze(data: str, scope: str, budget: float, query: str, output: str) -> None:
+async def _analyze(
+    data: str, scope: str, budget: float, query: str, output: str, mode: str = ""
+) -> None:
     from src.graph.workflow import run_workflow
 
+    resolved_mode = mode or "agent (default)"
     console.print(
         Panel(
             f"[bold]GrowthPilot Analysis[/bold]\n\n"
+            f"Mode: {resolved_mode}\n"
             f"Scope: {scope}\n"
             f"Data: {data or '(none)'}\n"
             f"Budget: {budget or '(none)'}\n"
@@ -120,6 +132,7 @@ async def _analyze(data: str, scope: str, budget: float, query: str, output: str
             data_path=data,
             budget=budget,
             scope=scope,
+            mode=mode,
         )
         progress.update(task, completed=True)
 

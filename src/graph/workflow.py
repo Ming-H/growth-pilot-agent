@@ -1,12 +1,15 @@
-"""GrowthPilot workflow — LangGraph StateGraph orchestration.
+"""GrowthPilot orchestration — agent-led by default, fixed DAG as fallback.
 
-Routes all analysis through the LangGraph StateGraph DAG (src.graph.graph),
-replacing the old Chief Agent ReAct loop.  The ``run_workflow()`` function
-signature is preserved for backward compatibility with CLI and web API.
+``run_workflow()`` preserves the historical interface for the CLI and web
+API and dispatches on ``Settings.orchestration_mode``:
 
-Design references:
-- LangGraph StateGraph: declarative DAG with conditional edges
-- OpenAI Runner: execution engine for the agent loop
+- ``"agent"`` (default): Chief Agent tool-calling loop
+  (:func:`src.agent.graph.run_agent_analysis`) — the LLM dynamically decides
+  which experts/tools to invoke, in which order, and when to answer.
+- ``"workflow"``: fixed ``plan → execute → evaluate → refine/approval/report``
+  DAG (:func:`src.graph.graph.run_analysis`) — deterministic routing.
+
+Both modes return the same result contract (see ``run_workflow``).
 """
 
 from __future__ import annotations
@@ -31,36 +34,13 @@ def _is_success(result_state: dict[str, Any]) -> bool:
     return status_str != "failed"
 
 
-# ---------------------------------------------------------------------------
-# Convenience runner (backward-compatible interface)
-# ---------------------------------------------------------------------------
-
-
-async def run_workflow(
+def _build_compat_result(
+    result_state: dict[str, Any],
     *,
-    query: str = "",
-    data_path: str = "",
-    budget: float = 0,
-    scope: str = "",
+    query: str,
+    scope: str,
 ) -> dict[str, Any]:
-    """Run the GrowthPilot analysis via the LangGraph StateGraph DAG.
-
-    This function preserves the old interface for CLI and web API compatibility.
-    Internally it delegates to :func:`src.graph.graph.run_analysis`.
-
-    Returns a dict with keys: success, query, scope, analysis_summary,
-    strategy_recommendation, expert_results, errors, report, metadata.
-    """
-    from src.graph.graph import run_analysis
-
-    result_state = await run_analysis(
-        query=query,
-        scope=scope or None,
-        budget=budget or None,
-        data_path=data_path or None,
-    )
-
-    # Map AnalysisState fields to the old result dict format for backward compat
+    """Map a final graph state (either mode) to the legacy result contract."""
     expert_results_list: list[dict[str, Any]] = result_state.get("expert_results", [])
     expert_results_map = {
         r.get("expert", f"unknown_{i}"): r for i, r in enumerate(expert_results_list)
@@ -68,14 +48,14 @@ async def run_workflow(
     final_report = result_state.get("final_report", "")
     execution_errors: list[str] = result_state.get("execution_errors", [])
 
-    # Build KPI snapshot by merging each expert's standardised `kpis` dict
+    # Merge each expert's standardised `kpis` dict into the snapshot
     kpi_snapshot: dict[str, Any] = {}
     for r in expert_results_list:
         expert_kpis = r.get("kpis", {})
         if isinstance(expert_kpis, dict):
             kpi_snapshot.update(expert_kpis)
 
-    result: dict[str, Any] = {
+    return {
         "success": _is_success(result_state),
         "query": query,
         "scope": scope or "full",
@@ -91,4 +71,58 @@ async def run_workflow(
         "kpi_snapshot": kpi_snapshot,
     }
 
-    return result
+
+# ---------------------------------------------------------------------------
+# Convenience runner (backward-compatible interface)
+# ---------------------------------------------------------------------------
+
+
+async def run_workflow(
+    *,
+    query: str = "",
+    data_path: str = "",
+    budget: float = 0,
+    scope: str = "",
+    mode: str = "",
+) -> dict[str, Any]:
+    """Run a GrowthPilot analysis in the configured orchestration mode.
+
+    Args:
+        query: The user's growth analytics question.
+        data_path: Optional path to a data file (CSV/Parquet).
+        budget: Optional budget for the analysis.
+        scope: Optional scope hint.
+        mode: Force ``"agent"`` or ``"workflow"``; empty string uses
+            ``Settings.orchestration_mode`` (default: agent).
+
+    Returns a dict with keys: success, query, scope, analysis_summary,
+    strategy_recommendation, expert_results, errors, report, metadata,
+    kpi_snapshot.
+    """
+    from src.core.config import get_settings
+
+    settings = get_settings()
+    resolved_mode = mode or settings.orchestration_mode
+
+    if resolved_mode == "agent":
+        from src.agent.graph import run_agent_analysis
+
+        logger.info("[run_workflow] mode=agent (Chief Agent tool-calling loop)")
+        result_state = await run_agent_analysis(
+            query=query,
+            scope=scope or None,
+            budget=budget or None,
+            data_path=data_path or None,
+        )
+    else:
+        from src.graph.graph import run_analysis
+
+        logger.info("[run_workflow] mode=workflow (fixed StateGraph DAG)")
+        result_state = await run_analysis(
+            query=query,
+            scope=scope or None,
+            budget=budget or None,
+            data_path=data_path or None,
+        )
+
+    return _build_compat_result(result_state, query=query, scope=scope)
