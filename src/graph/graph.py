@@ -237,31 +237,29 @@ async def run_analysis(
     Returns:
         Final AnalysisState dict after the graph completes.
     """
-    # Reset the process-global cost tracker so token/cost attribution is
-    # scoped to this analysis run (not accumulated across runs/requests).
-    from src.core.token_tracker import reset_cost_tracker
-
-    reset_cost_tracker()
-
-    compiled_graph = await build_compiled_graph()
-
+    # Run-scoped cost attribution: every LLM call inside this context
+    # (including worker threads) records to this run's tracker.
     from src.core.observability import trace_id_var
+    from src.core.token_tracker import cost_scope
 
     trace_id_var.set(f"{org_id}:{thread_id}")
 
-    initial_state: AnalysisState = {
-        "query": query,
-        "org_id": org_id,
-        "user_id": user_id,
-        "scope": scope,
-        "budget": budget,
-        "data_path": data_path,
-        "approval_required": approval_required,
-        "expert_results": [],
-        "execution_errors": [],
-        "status": AnalysisStatus.PENDING,
-    }
+    async with cost_scope():
+        compiled_graph = await build_compiled_graph()
 
-    config = {"configurable": {"thread_id": f"{org_id}:{thread_id}"}}
-    result = await compiled_graph.ainvoke(initial_state, config=config)
+        initial_state: AnalysisState = {
+            "query": query,
+            "org_id": org_id,
+            "user_id": user_id,
+            "scope": scope,
+            "budget": budget,
+            "data_path": data_path,
+            "approval_required": approval_required,
+            "expert_results": [],
+            "execution_errors": [],
+            "status": AnalysisStatus.PENDING,
+        }
+
+        config = {"configurable": {"thread_id": f"{org_id}:{thread_id}"}}
+        result = await compiled_graph.ainvoke(initial_state, config=config)
     return result

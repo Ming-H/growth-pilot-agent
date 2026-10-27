@@ -21,12 +21,11 @@ from src.core.config import Settings, get_settings
 def mock_settings() -> Settings:
     """Create a Settings instance with safe test defaults (no real API keys)."""
     return Settings(
-        llm_provider="openai",
         llm_model="gpt-4o-mini",
         llm_api_key="sk-test-key-for-testing",
         llm_base_url="https://api.example.com",
         llm_temperature=0.0,
-        memory_base_path="./data/test_memory",
+        memory_db_path="./data/test_memory/memory.db",
         log_level="DEBUG",
     )
 

@@ -1,4 +1,26 @@
-"""LLM factory for multi-provider support."""
+"""LLM factory — dual-track channel, resolved from a single base_url.
+
+Channel layout (v9, tally-style 换脑不改代码):
+
+- **本地通道**（base_url host = localhost/127.0.0.1/::1，零 key）:
+  - Ollama-shaped endpoints (:11434 or a path containing /api) use
+    ``ChatOllama`` (native protocol — think/tool-calling behave best there).
+  - Any other local endpoint (vLLM / SGLang on openEuler, typically :8000)
+    is treated as OpenAI-compatible and gets ``/v1`` appended if it has
+    no path. ``GPA_LLM_COMPAT_MODE=true`` forces this even for Ollama.
+- **远端通道**（其他 host，需 key）: any OpenAI-compatible endpoint —
+  Zhipu GLM (``https://open.bigmodel.cn/api/paas/v4`` or
+  ``/api/coding/paas/v4``), DeepSeek, OpenAI, … — via ``ChatOpenAI``.
+
+``create_llm`` returns ``None`` when no LLM is configured (remote channel
+without a key and not demo mode). That ``None`` is the degradation sentinel
+driving every deterministic fallback downstream — absence of a brain is a
+mode, not an error.
+
+Roles (fast/default/power) are presets on the ONE configured channel:
+they only pick a temperature (Settings.role_temperatures) and optionally a
+model override (Settings.role_models) — no per-tier endpoints any more.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +28,7 @@ import enum
 import logging
 import threading
 import time
+from urllib.parse import urlsplit
 
 from langchain_core.language_models import BaseChatModel
 
@@ -71,23 +94,22 @@ class CircuitBreaker:
 # Shared breaker registry
 # ---------------------------------------------------------------------------
 
-# Circuit breakers are shared per (provider, model, base_url) across the whole
-# process.  Without sharing, every call site (plan node, each expert, report
-# node) would own a private breaker and a provider-wide outage could never
-# trip a common circuit.
-_breaker_registry: dict[tuple[str, str, str], CircuitBreaker] = {}
+# Circuit breakers are shared per (base_url, model) across the whole process.
+# Without sharing, every call site (plan node, each expert, report node)
+# would own a private breaker and a provider-wide outage could never trip a
+# common circuit.
+_breaker_registry: dict[tuple[str, str], CircuitBreaker] = {}
 _breaker_registry_lock = threading.Lock()
 
 
 def _get_shared_breaker(
-    provider: str,
-    model: str,
     base_url: str,
+    model: str,
     failure_threshold: int,
     recovery_timeout: float,
 ) -> CircuitBreaker:
     """Return the process-wide CircuitBreaker for this LLM endpoint."""
-    key = (provider, model, base_url)
+    key = (base_url, model)
     with _breaker_registry_lock:
         breaker = _breaker_registry.get(key)
         if breaker is None:
@@ -106,7 +128,7 @@ def _reset_breaker_registry() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Resilient LLM proxy
+# Resilient LLM proxy (remote → remote fallback only)
 # ---------------------------------------------------------------------------
 
 
@@ -178,169 +200,180 @@ class ResilientLLM:
 
 
 # ---------------------------------------------------------------------------
-# Factory helpers
+# Factory
 # ---------------------------------------------------------------------------
+
+
+def _openai_compatible_local_url(base_url: str) -> str:
+    """Normalise a local OpenAI-compatible base_url (append /v1 if pathless)."""
+    parts = urlsplit(base_url)
+    if not parts.path or parts.path == "/":
+        return base_url.rstrip("/") + "/v1"
+    return base_url
 
 
 def create_llm(
     settings: Settings | None = None,
-    provider: str | None = None,
-    model: str | None = None,
-    temperature: float | None = None,
-    tier: str | None = None,
+    *,
+    role: str = "default",
     agent_name: str | None = None,
-    api_key: str | None = None,
-    base_url: str | None = None,
-) -> BaseChatModel:
-    """Create an LLM instance based on configuration.
+    tier: str | None = None,  # legacy alias for `role` (v8 call sites)
+) -> BaseChatModel | None:
+    """Create the LLM for the configured channel and role preset.
 
-    Supports: openai, deepseek, local (Ollama).
-
-    ``api_key``/``base_url`` explicitly override the settings-derived values
-    (used to build a fallback LLM with its own credentials).
+    Returns ``None`` when no LLM is available (remote channel, no key, not
+    demo mode) — callers treat ``None`` as the deterministic-degradation
+    sentinel rather than an error.
     """
     s = settings or get_settings()
+    if tier is not None:
+        role = tier  # v8 compatibility
 
-    # If tier is specified, override provider/model/temperature from tier config
-    if tier is not None and tier in s.model_tiers:
-        tier_config = s.model_tiers[tier]
-        p = provider or tier_config.get("provider", s.llm_provider)
-        m = model or tier_config.get("model", s.llm_model)
-        t = (
-            temperature
-            if temperature is not None
-            else tier_config.get("temperature", s.llm_temperature)
+    if not s.llm_available:
+        logger.info(
+            "[llm_factory] No LLM configured (channel=%s, key=%s, demo=%s) — "
+            "deterministic degradation",
+            s.channel,
+            bool(s.llm_api_key),
+            s.demo_mode,
         )
-    else:
-        p = provider or s.llm_provider
-        m = model or s.llm_model
-        t = temperature if temperature is not None else s.llm_temperature
+        return None
 
-    if p in ("openai", "deepseek"):
-        from langchain_openai import ChatOpenAI
+    model = s.role_model(role)
+    temperature = s.role_temperature(role)
 
-        resolved_base_url = base_url
-        if resolved_base_url is None:
-            resolved_base_url = s.llm_base_url or None
-            if p == "deepseek" and not resolved_base_url:
-                resolved_base_url = "https://api.deepseek.com"
+    callbacks = []
+    if agent_name:
+        from src.core.token_tracker import TokenTrackingCallback
 
-            # If tier config specifies a base_url, prefer it
-            if tier is not None and tier in s.model_tiers:
-                tier_base_url = s.model_tiers[tier].get("base_url")
-                if tier_base_url:
-                    resolved_base_url = tier_base_url
+        callbacks = [TokenTrackingCallback(agent_name=agent_name)]
 
-        # Fail-fast: only allow placeholder API key in demo mode
-        resolved_api_key = api_key or s.llm_api_key
-        if not resolved_api_key:
-            if s.demo_mode:
-                resolved_api_key = "sk-demo-placeholder"
-            else:
-                raise ValueError("No LLM API key configured. Set GPA_LLM_API_KEY.")
-        callbacks = []
-        if agent_name:
-            from src.core.token_tracker import TokenTrackingCallback
+    if s.ollama_native:
+        from langchain_ollama import ChatOllama
 
-            callbacks = [TokenTrackingCallback(agent_name=agent_name)]
-
-        return ChatOpenAI(
-            model=m,
-            temperature=t,
-            api_key=resolved_api_key,
-            base_url=resolved_base_url,
-            callbacks=callbacks,
+        # ChatOllama expects the host root (no /v1, no /api suffix).
+        parts = urlsplit(s.llm_base_url)
+        host = f"{parts.scheme}://{parts.netloc}"
+        return ChatOllama(
+            model=model,
+            temperature=temperature,
+            base_url=host,
+            callbacks=callbacks,  # type: ignore[arg-type]
         )
 
-    if p == "local":
-        from langchain_community.chat_models import ChatOllama
+    # Everything else (local vLLM/SGLang + all remote endpoints) is
+    # OpenAI-compatible.
+    from langchain_openai import ChatOpenAI
 
-        callbacks = []
-        if agent_name:
-            from src.core.token_tracker import TokenTrackingCallback
+    base_url = s.llm_base_url
+    if s.channel == "local":
+        base_url = _openai_compatible_local_url(base_url)
 
-            callbacks = [TokenTrackingCallback(agent_name=agent_name)]
+    api_key = s.llm_api_key
+    if s.channel == "local" and not api_key:
+        api_key = "local-not-needed"
 
-        return ChatOllama(model=m, temperature=t, callbacks=callbacks)
-
-    raise ValueError(f"Unsupported LLM provider: {p}")
+    return ChatOpenAI(
+        model=model,
+        temperature=temperature,
+        api_key=api_key,
+        base_url=base_url,
+        callbacks=callbacks,
+    )
 
 
 def create_resilient_llm(
     settings: Settings | None = None,
-    tier: str | None = None,
+    *,
+    role: str = "default",
     agent_name: str | None = None,
-) -> BaseChatModel:
-    """Create an LLM with fallback and circuit breaker support.
+    tier: str | None = None,  # legacy alias for `role`
+) -> BaseChatModel | None:
+    """Create the role LLM, wrapped with cross-vendor fallback when useful.
 
-    Returns a :class:`ResilientLLM` proxy when a *genuinely different*
-    fallback is configured; otherwise returns the plain primary LLM.
-
-    A fallback identical to the primary (same provider, model and endpoint)
-    is detected and rejected — retrying the same failing endpoint adds
-    latency without adding resilience.
+    Fallback only matters remote→remote: on the local channel the honest
+    "fallback" is deterministic degradation (``None`` handling downstream),
+    and a remote fallback would silently reintroduce network dependency the
+    local track exists to avoid. A fallback identical to the primary (same
+    base_url + model) is detected and rejected.
     """
     s = settings or get_settings()
-    primary = create_llm(settings=s, tier=tier, agent_name=agent_name)
+    if tier is not None:
+        role = tier
 
-    if not s.fallback_enabled:
+    primary = create_llm(s, role=role, agent_name=agent_name)
+    if primary is None:
+        return None
+
+    if not s.fallback_enabled or s.channel != "remote":
+        return primary
+    if not s.fallback_base_url or not s.fallback_model:
         return primary
 
-    # Resolve the effective primary endpoint identity for comparison
-    tier_config = s.model_tiers.get(tier or "", {})
-    primary_provider = tier_config.get("provider", s.llm_provider)
-    primary_model = tier_config.get("model", s.llm_model)
-    primary_base_url = tier_config.get("base_url", s.llm_base_url)
+    if s.fallback_base_url.rstrip("/") == s.llm_base_url.rstrip(
+        "/"
+    ) and s.fallback_model == s.role_model(role):
+        logger.warning(
+            "Fallback LLM is identical to primary (%s/%s) — disabling fallback. "
+            "Configure a different GPA_FALLBACK_BASE_URL/MODEL.",
+            s.fallback_base_url,
+            s.fallback_model,
+        )
+        return primary
 
-    # Try to create fallback LLM with its own credentials/endpoint
     try:
-        fallback_provider = s.fallback_provider
-        fallback_model = s.fallback_model
-        if not fallback_provider or not fallback_model:
-            return primary
-        fallback = create_llm(
-            settings=s,
-            provider=fallback_provider,
-            model=fallback_model,
+        fallback = create_fallback_llm(
+            s,
+            base_url=s.fallback_base_url,
+            model=s.fallback_model,
             api_key=s.fallback_api_key or None,
-            base_url=s.fallback_base_url or None,
+            agent_name=agent_name,
         )
     except Exception as exc:
         logger.warning("Failed to create fallback LLM, running without fallback: %s", exc)
         return primary
 
-    # Resolve the effective fallback endpoint identity
-    fallback_base_url = s.fallback_base_url
-    if not fallback_base_url and fallback_provider == "deepseek":
-        fallback_base_url = "https://api.deepseek.com"
-
-    # Reject self-fallback: same provider + model + endpoint as the primary
-    if (
-        fallback_provider == primary_provider
-        and fallback_model == primary_model
-        and fallback_base_url == primary_base_url
-    ):
-        logger.warning(
-            "Fallback LLM is identical to primary (%s/%s @ %s) — "
-            "disabling fallback. Configure a different GPA_FALLBACK_PROVIDER/MODEL.",
-            fallback_provider,
-            fallback_model,
-            fallback_base_url,
-        )
-        return primary
-
-    # Circuit breakers are shared per endpoint so a provider-wide outage
-    # trips one circuit for every call site in the process.
     breaker = _get_shared_breaker(
-        provider=primary_provider,
-        model=primary_model,
-        base_url=primary_base_url or "",
+        base_url=s.llm_base_url,
+        model=s.role_model(role),
         failure_threshold=s.circuit_breaker_threshold,
         recovery_timeout=s.circuit_breaker_recovery_seconds,
     )
-
     return ResilientLLM(  # type: ignore[return-value]
         primary=primary,
         fallback=fallback,
         circuit_breaker=breaker,
+    )
+
+
+def create_fallback_llm(
+    s: Settings,
+    *,
+    base_url: str,
+    model: str,
+    api_key: str | None,
+    agent_name: str | None,
+) -> BaseChatModel:
+    """Build a plain ChatOpenAI against an explicit endpoint (fallback path)."""
+    from langchain_openai import ChatOpenAI
+
+    callbacks = []
+    if agent_name:
+        from src.core.token_tracker import TokenTrackingCallback
+
+        callbacks = [TokenTrackingCallback(agent_name=agent_name)]
+
+    effective_key = api_key or s.llm_api_key
+    if not effective_key:
+        if s.demo_mode:
+            effective_key = "sk-demo-placeholder"
+        else:
+            raise ValueError("Fallback endpoint needs an API key (GPA_FALLBACK_API_KEY).")
+
+    return ChatOpenAI(
+        model=model,
+        temperature=s.role_temperature("default"),
+        api_key=effective_key,
+        base_url=base_url,
+        callbacks=callbacks,
     )

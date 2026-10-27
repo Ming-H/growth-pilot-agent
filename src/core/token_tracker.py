@@ -1,22 +1,27 @@
-"""Token usage tracking via LangChain callback handler."""
+"""Run-scoped token usage tracking via LangChain callback handler.
+
+v9: attribution is **per run**, not per process. The tracker lives in a
+ContextVar set by ``cost_scope()``; ``asyncio.to_thread`` propagates context
+vars into worker threads, so expert pipelines executing there attribute to
+the right run. Records made outside any scope are dropped (debug-logged) —
+never attributed to the wrong run.
+"""
 
 from __future__ import annotations
 
 import logging
-import threading
-from typing import Any
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
+from typing import Any, AsyncIterator
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.outputs import LLMResult
 
 logger = logging.getLogger(__name__)
 
-_tracker_instance: CostTracker | None = None
-_tracker_lock = threading.Lock()
-
 
 class CostTracker:
-    """Track token usage and estimated cost per agent per run."""
+    """Track token usage and estimated cost per agent for one run."""
 
     PRICING: dict[str, dict[str, float]] = {
         "gpt-4o": {"input": 2.50, "output": 10.00},
@@ -80,29 +85,61 @@ class CostTracker:
         self._records.clear()
 
 
+# ---------------------------------------------------------------------------
+# Run-scoped tracker (ContextVar)
+# ---------------------------------------------------------------------------
+
+run_cost_tracker: ContextVar[CostTracker | None] = ContextVar("run_cost_tracker", default=None)
+
+
+@asynccontextmanager
+async def cost_scope() -> AsyncIterator[CostTracker]:
+    """Open a per-run cost attribution scope.
+
+    Every LLM call made inside this context (including from worker threads —
+    ``asyncio.to_thread`` propagates context vars) records to this tracker.
+    """
+    tracker = CostTracker()
+    token = run_cost_tracker.set(tracker)
+    try:
+        yield tracker
+    finally:
+        run_cost_tracker.reset(token)
+
+
 def get_cost_tracker() -> CostTracker:
-    """Return the singleton CostTracker instance."""
-    global _tracker_instance
-    if _tracker_instance is None:
-        with _tracker_lock:
-            if _tracker_instance is None:
-                _tracker_instance = CostTracker()
-    return _tracker_instance
+    """Return the current run's tracker, or a fresh detached one.
+
+    The detached fallback keeps legacy callers (tests, report nodes outside
+    a scope) working; a fresh tracker simply reports zeros rather than
+    mis-attributing another run's records.
+    """
+    return run_cost_tracker.get() or CostTracker()
 
 
 def reset_cost_tracker() -> None:
-    """Reset the singleton for a new analysis run."""
-    get_cost_tracker().reset()
+    """No-op retained for call-site compatibility.
+
+    v8 reset a process-global singleton at run start, which corrupted
+    attribution under concurrent requests. v9 scopes trackers per run via
+    :func:`cost_scope` — nothing to reset.
+    """
+    return None
 
 
 class TokenTrackingCallback(BaseCallbackHandler):
-    """LangChain callback handler that records token usage to CostTracker."""
+    """LangChain callback handler that records token usage to the run tracker."""
 
     def __init__(self, agent_name: str = "unknown") -> None:
         self._agent_name = agent_name
 
     def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
-        tracker = get_cost_tracker()
+        tracker = run_cost_tracker.get()
+        if tracker is None:
+            # Outside any run scope (e.g. a long-lived cached expert LLM used
+            # ad hoc) — drop rather than mis-attribute.
+            logger.debug("[token_tracker] LLM call outside cost_scope, not recorded")
+            return
         try:
             # Extract token usage from response metadata
             for generation_list in response.generations:

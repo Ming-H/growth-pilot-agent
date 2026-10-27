@@ -132,12 +132,11 @@ def _run_expert_tool(
 def _search_memory_tool(state: dict[str, Any], query: str) -> dict[str, Any]:
     """Retrieve prior analyses for this organisation (best-effort)."""
     try:
-        from src.core.config import get_settings
+        from src.core.config import _memory_dir
         from src.memory.manager import MemoryManager
 
-        settings = get_settings()
         memory = MemoryManager(
-            base_path=settings.memory_base_path,
+            base_path=_memory_dir(),
             org_id=state.get("org_id", "default"),
         )
         hits = memory.search(query, limit=3)

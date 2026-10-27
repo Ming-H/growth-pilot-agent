@@ -120,11 +120,9 @@ def _create_expert(expert_key: str) -> Any:
     if expert_key in _expert_cache and (now - cached_time) < _cache_ttl:
         return _expert_cache[expert_key]
 
-    from src.core.config import get_settings
     from src.core.llm_factory import create_resilient_llm
 
-    settings = get_settings()
-    llm = create_resilient_llm(tier=settings.expert_model_tier)
+    llm = create_resilient_llm(role="default")
     cls = _get_expert_cls(expert_key)
     expert = cls(llm=llm)
     _expert_cache[expert_key] = expert
@@ -173,12 +171,11 @@ async def plan_node(state: AnalysisState) -> dict:  # noqa: D401
     # Best-effort: memory unavailability must never block an analysis.
     memory_context: list[dict[str, Any]] = []
     try:
-        from src.core.config import get_settings
+        from src.core.config import _memory_dir
         from src.memory.manager import MemoryManager
 
-        settings = get_settings()
         memory = MemoryManager(
-            base_path=settings.memory_base_path,
+            base_path=_memory_dir(),
             org_id=state.get("org_id", "default"),
         )
         for hit in memory.search(query, limit=3):
@@ -208,7 +205,7 @@ async def plan_node(state: AnalysisState) -> dict:  # noqa: D401
         memory_block = f"\nRelevant prior analyses for this org (use as context):\n{prior}\n"
 
     try:
-        llm = create_resilient_llm(tier="default", agent_name="plan_node")
+        llm = create_resilient_llm(role="default", agent_name="plan_node")
         prompt = PLAN_PROMPT.format(query=query, scope=scope or "full") + memory_block
         response = await llm.ainvoke(prompt)
         content = response.content if hasattr(response, "content") else str(response)
@@ -665,7 +662,7 @@ Be concise but specific. Use data and metrics from the expert results.
     try:
         # Final synthesis reasons across all expert outputs — the strongest
         # tier is reserved for this step (see Settings.model_tiers).
-        llm = create_resilient_llm(tier="power", agent_name="report_node")
+        llm = create_resilient_llm(role="power", agent_name="report_node")
         response = await llm.ainvoke(report_prompt)
         final_report = response.content if hasattr(response, "content") else str(response)
 

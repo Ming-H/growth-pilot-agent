@@ -345,11 +345,20 @@ def info() -> None:
 
     info_items = [
         ("Version", __version__),
-        ("LLM Provider", settings.llm_provider),
+        ("Orchestration Mode", settings.orchestration_mode),
+        ("LLM Channel", settings.channel),
+        ("LLM Base URL", settings.llm_base_url),
         ("LLM Model", settings.llm_model),
-        ("API Key Set", "Yes" if settings.llm_api_key else "No (demo mode)"),
-        ("Fallback Provider", settings.fallback_provider),
-        ("Fallback Model", settings.fallback_model),
+        ("LLM Available", "Yes" if settings.llm_available else "No (deterministic degradation)"),
+        ("API Key Set", "Yes" if settings.llm_api_key else "No"),
+        (
+            "Fallback",
+            f"{settings.fallback_model} @ {settings.fallback_base_url}"
+            if settings.fallback_base_url and settings.fallback_model
+            else "(none)",
+        ),
+        ("KPI Gate", settings.kpi_gate),
+        ("Demo Mode", str(settings.demo_mode)),
         ("Log Level", settings.log_level),
         ("Data Directory", str(settings.data_dir)),
         ("Output Directory", str(settings.output_dir)),

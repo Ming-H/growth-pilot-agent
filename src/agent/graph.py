@@ -115,13 +115,10 @@ async def run_agent_analysis(
     thread_id: str = "default",
 ) -> dict[str, Any]:
     """Run a complete agent-led analysis; returns the final AgentState dict."""
-    from src.core.token_tracker import reset_cost_tracker
-
-    reset_cost_tracker()
-
-    compiled = await build_compiled_agent_graph()
-
+    # Run-scoped cost attribution (concurrent runs no longer share a
+    # process-global tracker).
     from src.core.observability import trace_id_var
+    from src.core.token_tracker import cost_scope
 
     trace_id_var.set(f"{org_id}:{thread_id}")
 
@@ -141,11 +138,14 @@ async def run_agent_analysis(
 
     config = {"configurable": {"thread_id": f"{org_id}:{thread_id}"}}
     try:
-        result = await compiled.ainvoke(initial_state, config=config)
+        async with cost_scope():
+            compiled = await build_compiled_agent_graph()
+            result = await compiled.ainvoke(initial_state, config=config)
     except Exception as exc:
-        # In agent-led mode the LLM *is* the orchestrator — if it is
-        # unavailable there is no honest fallback. Fail cleanly with an
-        # actionable message instead of a stack trace.
+        # In agent-led mode the LLM *is* the orchestrator — when it is not
+        # configured the heuristic brain (v9) still runs through the same
+        # graph; a hard failure here means something else broke. Fail
+        # cleanly with an actionable message instead of a stack trace.
         logger.error("[run_agent_analysis] agent loop failed: %s", exc)
         return {
             **initial_state,
@@ -153,9 +153,8 @@ async def run_agent_analysis(
             "execution_errors": [f"agent loop: {exc}"],
             "final_report": (
                 f"# Agent 运行失败\n\n## 错误\n{exc}\n\n"
-                "Agent 主导模式依赖 LLM 决策。请检查 GPA_LLM_API_KEY / "
-                "GPA_LLM_BASE_URL 配置，或使用 `--mode workflow`（关键词路由，"
-                "不依赖 LLM 决策）作为降级方案。"
+                "请检查 GPA_LLM_BASE_URL / GPA_LLM_API_KEY 配置，或使用 "
+                "`--mode workflow`（关键词路由，不依赖 LLM 决策）作为降级方案。"
             ),
         }
 

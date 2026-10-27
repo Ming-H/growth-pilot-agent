@@ -82,7 +82,7 @@ async def chief_agent_node(state: AgentState) -> dict:
     from src.agent.tools import build_tool_specs, to_langchain_tools
     from src.core.llm_factory import create_llm
 
-    llm = create_llm(tier="power", agent_name="chief_agent")
+    llm = create_llm(role="power", agent_name="chief_agent")
     bound = llm.bind_tools(to_langchain_tools(build_tool_specs()))
 
     system = SystemMessage(content=_build_system_prompt(state))
@@ -277,12 +277,11 @@ async def agent_report_node(state: AgentState) -> dict:
 
     # Memory write-back: close the loop (search_memory read it, this stores it)
     try:
-        from src.core.config import get_settings
+        from src.core.config import _memory_dir
         from src.memory.manager import MemoryManager
 
-        settings = get_settings()
         memory = MemoryManager(
-            base_path=settings.memory_base_path,
+            base_path=_memory_dir(),
             org_id=state.get("org_id", "default"),
         )
         memory.store(

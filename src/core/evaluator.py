@@ -63,7 +63,7 @@ async def evaluate_expert_output(
     tier: str = "fast",
 ) -> QualityScore:
     """Evaluate a single expert's output quality using LLM-as-judge."""
-    llm = create_resilient_llm(tier=tier, agent_name="evaluator")
+    llm = create_resilient_llm(role=tier, agent_name="evaluator")
     prompt = EVAL_PROMPT.format(
         expert_name=expert_name,
         query=query,
