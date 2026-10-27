@@ -14,12 +14,9 @@ import numpy as np
 import pandas as pd
 from scipy import signal, stats
 
-from src.tools.registry import register
-
 logger = logging.getLogger(__name__)
 
 
-@register("seasonal_analyzer", category="conversion")
 class SeasonalAnalyzer:
     """Detect seasonal patterns and plan marketing campaigns."""
 

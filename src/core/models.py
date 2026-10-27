@@ -143,14 +143,9 @@ class AdResult(AgentResult):
     expansion_opportunities: list[str] = Field(default_factory=list)
     analysis: LLMAnalysis = Field(default_factory=LLMAnalysis)
 
-
-# ---------------------------------------------------------------------------
-# KPI Snapshot (built by report_node)
-# ---------------------------------------------------------------------------
-
-
-class KpiSnapshot(BaseModel):
-    """Aggregate key metrics from all sub-agent results."""
+    # ---------------------------------------------------------------------------
+    # KPI Snapshot (built by report_node)
+    # ---------------------------------------------------------------------------
 
     total_users: int = 0
     intent_auc: float = 0.0

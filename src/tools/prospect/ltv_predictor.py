@@ -17,12 +17,9 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
-from src.tools.registry import ToolRegistry
-
 logger = logging.getLogger(__name__)
 
 
-@ToolRegistry.register("ltv_predictor")
 class LTVPredictor:
     """Predict customer lifetime value and analyse LTV/CAC ratios.
 

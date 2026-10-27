@@ -14,12 +14,9 @@ import numpy as np
 import pandas as pd
 from scipy.signal import argrelextrema
 
-from src.tools.registry import ToolRegistry
-
 logger = logging.getLogger(__name__)
 
 
-@ToolRegistry.register("cohort_analyzer")
 class CohortAnalyzer:
     """Analyse user retention by cohort dimensions.
 

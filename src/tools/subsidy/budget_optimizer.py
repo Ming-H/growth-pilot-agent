@@ -11,8 +11,6 @@ from typing import Any
 
 import numpy as np
 
-from src.tools.registry import ToolRegistry
-
 logger = logging.getLogger(__name__)
 
 try:
@@ -24,7 +22,6 @@ except ImportError:
     logger.warning("PuLP not available; budget optimisation will use greedy fallback")
 
 
-@ToolRegistry.register("budget_optimizer")
 class BudgetOptimizer:
     """Optimise subsidy budget allocation across user segments."""
 

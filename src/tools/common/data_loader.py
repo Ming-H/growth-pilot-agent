@@ -14,10 +14,8 @@ import numpy as np
 import pandas as pd
 
 from src.tools.common.secure_loader import SecureDataLoader
-from src.tools.registry import register
 
 
-@register("data_loader", category="common")
 class DataLoader:
     """Load data from files or generate realistic sample data."""
 

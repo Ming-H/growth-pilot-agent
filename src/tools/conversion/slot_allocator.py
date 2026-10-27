@@ -11,8 +11,6 @@ from typing import Any
 
 import pandas as pd
 
-from src.tools.registry import ToolRegistry
-
 logger = logging.getLogger(__name__)
 
 # Default slot definitions for Didi freight app
@@ -40,7 +38,6 @@ DEFAULT_SLOTS = {
 }
 
 
-@ToolRegistry.register("slot_allocator")
 class SlotAllocator:
     """Allocate limited in-app slots across user segments."""
 

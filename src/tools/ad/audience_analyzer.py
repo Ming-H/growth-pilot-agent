@@ -11,10 +11,7 @@ from typing import Any
 import numpy as np
 from numpy.linalg import norm
 
-from src.tools.registry import ToolRegistry
 
-
-@ToolRegistry.register("audience_analyzer")
 class AudienceAnalyzer:
     """Analyze audience segments and perform lookalike expansion."""
 

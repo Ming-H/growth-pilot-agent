@@ -15,12 +15,9 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.tools.registry import register
-
 logger = logging.getLogger(__name__)
 
 
-@register("attributor", category="conversion")
 class Attributor:
     """Multi-touch attribution analysis across five models."""
 

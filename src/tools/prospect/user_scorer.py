@@ -12,12 +12,9 @@ import logging
 import numpy as np
 import pandas as pd
 
-from src.tools.registry import ToolRegistry
-
 logger = logging.getLogger(__name__)
 
 
-@ToolRegistry.register("user_scorer")
 class UserScorer:
     """Combine intent scores with LTV predictions to rank and segment users.
 

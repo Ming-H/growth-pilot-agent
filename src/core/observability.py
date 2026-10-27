@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import logging
 import os
-import time
-from collections import defaultdict
 from contextvars import ContextVar
 from typing import Any
 
@@ -121,70 +119,8 @@ def setup_observability(settings: Any) -> None:
     )
 
 
-class CostTracker:
-    """Track token usage and estimated cost per agent per run."""
-
-    # Pricing per 1M tokens (as of 2024)
-    PRICING: dict[str, dict[str, float]] = {
-        "gpt-4o": {"input": 2.50, "output": 10.00},
-        "gpt-4o-mini": {"input": 0.15, "output": 0.60},
-        "deepseek-chat": {"input": 0.14, "output": 0.28},
-        "glm-4.7": {"input": 0.000001, "output": 0.000002},
-    }
-
-    def __init__(self) -> None:
-        self._records: list[dict[str, Any]] = []
-
-    def record(
-        self,
-        agent: str,
-        model: str,
-        input_tokens: int,
-        output_tokens: int,
-    ) -> None:
-        """Record token usage for a single LLM call."""
-        prices = self.PRICING.get(model, {"input": 0.50, "output": 1.50})
-        cost = (input_tokens * prices["input"] + output_tokens * prices["output"]) / 1_000_000
-        self._records.append(
-            {
-                "agent": agent,
-                "model": model,
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "cost_usd": round(cost, 6),
-                "timestamp": time.time(),
-            }
-        )
-
-    @property
-    def total_cost(self) -> float:
-        return round(sum(r["cost_usd"] for r in self._records), 6)
-
-    @property
-    def total_tokens(self) -> int:
-        return sum(r["input_tokens"] + r["output_tokens"] for r in self._records)
-
-    def report(self) -> dict[str, Any]:
-        """Generate a cost summary report."""
-        by_agent: dict[str, dict[str, Any]] = defaultdict(
-            lambda: {"cost_usd": 0.0, "calls": 0, "tokens": 0}
-        )
-        for r in self._records:
-            by_agent[r["agent"]]["cost_usd"] += r["cost_usd"]
-            by_agent[r["agent"]]["calls"] += 1
-            by_agent[r["agent"]]["tokens"] += r["input_tokens"] + r["output_tokens"]
-
-        return {
-            "total_cost_usd": self.total_cost,
-            "total_tokens": self.total_tokens,
-            "total_calls": len(self._records),
-            "by_agent": dict(by_agent),
-            "records": self._records,
-        }
-
-    def reset(self) -> None:
-        """Clear all records."""
-        self._records.clear()
+# NOTE: cost tracking lives in src/core/token_tracker.py (single home — the
+# parallel CostTracker that used to live here was dead code, removed in v9).
 
 
 def traced(name: str):

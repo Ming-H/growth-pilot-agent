@@ -11,12 +11,9 @@ import logging
 import numpy as np
 import pandas as pd
 
-from src.tools.registry import ToolRegistry
-
 logger = logging.getLogger(__name__)
 
 
-@ToolRegistry.register("segmentor")
 class UserSegmentor:
     """RFM + lifecycle segmentation for ride-hailing users.
 

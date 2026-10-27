@@ -11,8 +11,6 @@ from typing import Any
 
 import pandas as pd
 
-from src.tools.registry import ToolRegistry
-
 logger = logging.getLogger(__name__)
 
 # -----------------------------------------------------------------------
@@ -63,7 +61,6 @@ _DEFAULT_STRATEGIES: dict[str, dict[str, Any]] = {
 }
 
 
-@ToolRegistry.register("winback_planner")
 class WinbackPlanner:
     """Generate per-segment win-back plans for churned users.
 

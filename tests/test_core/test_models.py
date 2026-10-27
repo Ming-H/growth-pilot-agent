@@ -10,7 +10,6 @@ from src.core.models import (
     BidResult,
     ChurnRisk,
     ConversionResult,
-    KpiSnapshot,
     LLMAnalysis,
     ProspectResult,
     RetentionResult,
@@ -104,18 +103,6 @@ class TestAdResult:
         )
         assert r.agent_name == "ad"
         assert r.bid_result.optimized_bid == 8.5
-
-
-class TestKpiSnapshot:
-    def test_default_values(self):
-        kpi = KpiSnapshot()
-        assert kpi.total_users == 0
-        assert kpi.scope == "full"
-
-    def test_custom_values(self):
-        kpi = KpiSnapshot(total_users=1000, conversion_rate=0.15, budget=50000)
-        assert kpi.total_users == 1000
-        assert kpi.conversion_rate == 0.15
 
 
 class TestInvalidData:

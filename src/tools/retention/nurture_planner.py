@@ -13,8 +13,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.tools.registry import ToolRegistry
-
 logger = logging.getLogger(__name__)
 
 # -----------------------------------------------------------------------
@@ -49,7 +47,6 @@ _DEFAULT_RETENTION_BASELINE: dict[str, float] = {
 }
 
 
-@ToolRegistry.register("nurture_planner")
 class NurturePlanner:
     """Plan and evaluate new-user onboarding nurture campaigns.
 

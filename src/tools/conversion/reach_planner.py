@@ -11,8 +11,6 @@ from typing import Any
 
 import pandas as pd
 
-from src.tools.registry import register
-
 logger = logging.getLogger(__name__)
 
 # Channel definitions with typical characteristics
@@ -78,7 +76,6 @@ CREATIVE_TEMPLATES: dict[str, list[str]] = {
 }
 
 
-@register("reach_planner", category="conversion")
 class ReachPlanner:
     """Plan in-app reach strategy for user segments."""
 

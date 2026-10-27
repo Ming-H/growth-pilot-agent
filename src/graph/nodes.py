@@ -501,12 +501,10 @@ async def refine_node(state: AnalysisState) -> dict:  # noqa: D401
 
     async def _refine_expert(expert_key: str) -> tuple[str, dict[str, Any]]:
         expert = _create_expert(expert_key)
-        feedback = quality_scores.get(expert_key, {}).get("reasoning", "")
         params = {
             "query": query,
             "scope": scope,
             "budget": budget,
-            "refinement_feedback": feedback,
             "is_refinement": True,
         }
         async with asyncio.timeout(settings.expert_timeout_seconds):
