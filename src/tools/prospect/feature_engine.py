@@ -56,9 +56,11 @@ class FeatureEngine:
         df = user_logs.copy()
         self._coerce_log_columns(df)
 
-        now = pd.Timestamp.now()
         df["ride_time"] = pd.to_datetime(df["ride_time"], errors="coerce")
         df = df.dropna(subset=["ride_time"])
+        # As-of anchor = last observed event + 1 day: deterministic given the
+        # data (wall-clock anchoring drifted recency features run-to-run).
+        now = df["ride_time"].max() + pd.Timedelta(days=1)
 
         df["hour"] = df["ride_time"].dt.hour
         df["dow"] = df["ride_time"].dt.dayofweek  # 0=Mon
@@ -116,9 +118,9 @@ class FeatureEngine:
         df = user_logs.copy()
         self._coerce_log_columns(df)
 
-        now = pd.Timestamp.now()
         df["ride_time"] = pd.to_datetime(df["ride_time"], errors="coerce")
         df = df.dropna(subset=["ride_time"])
+        now = df["ride_time"].max() + pd.Timedelta(days=1)  # as-of anchor
 
         records: list[dict[str, Any]] = []
         for uid, grp in df.groupby("user_id"):
@@ -261,7 +263,11 @@ class FeatureEngine:
 
         # --- Ride logs ---
         ride_user_ids = rng.choice(user_ids, size=n_rides)
-        base_time = pd.Timestamp.now()
+        # FIXED time anchor: wall-clock anchoring made recency features drift
+        # between runs by seconds — breaking the byte-identical determinism
+        # invariant of zero-key mode. Demo data is synthetic; a fixed anchor
+        # costs nothing and makes runs reproducible.
+        base_time = pd.Timestamp("2026-01-01T00:00:00")
 
         # Generate timestamps spread over last 60 days
         offsets_seconds = rng.randint(0, 60 * 24 * 3600, size=n_rides)

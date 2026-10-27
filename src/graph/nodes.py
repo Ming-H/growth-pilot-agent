@@ -414,22 +414,6 @@ async def execute_node(state: AnalysisState) -> dict:  # noqa: D401
 
             expert_results.append(result)
 
-    # ── L1 fact ledger write-back (gated: success ∧ validated ∧ kpis) ────
-    try:
-        from src.core.config import get_settings as _gs
-        from src.memory import MemoryStore
-
-        _store = MemoryStore(db_path=_gs().memory_db_path)
-        for res in expert_results:
-            n = await _store.record_facts(
-                state.get("org_id", "default"), res, run_fingerprint=str(budget)
-            )
-            if n:
-                logger.debug("[execute_node] L1 ledger +%d facts (%s)", n, res.get("expert"))
-        await _store.close()
-    except Exception as exc:
-        logger.debug("[execute_node] L1 ledger unavailable: %s", exc)
-
     return {
         "expert_results": expert_results,
         "execution_errors": execution_errors,
@@ -741,6 +725,18 @@ Generate a structured report in Markdown with these sections:
 Be concise but specific. Use data and metrics from the expert results.
 """
 
+    # KPI snapshot aggregated from expert results — ground truth for the
+    # reconciliation gate and the template renderer. Computed BEFORE the
+    # report so the deterministic fallback renders real numbers (not N/A).
+    kpi_snapshot: dict[str, Any] = {}
+    for r in state.get("expert_results", []):
+        ek = r.get("kpis")
+        if isinstance(ek, dict):
+            kpi_snapshot.update(ek)
+    if state.get("budget"):
+        kpi_snapshot.setdefault("budget", float(state["budget"]))
+    render_state = {**dict(state), "kpi_snapshot": kpi_snapshot}
+
     # Final synthesis uses the power role across all expert outputs. When
     # no LLM is configured (or synthesis fails) the deterministic template
     # ReportGenerator renders expert results — a report is always produced.
@@ -748,7 +744,7 @@ Be concise but specific. Use data and metrics from the expert results.
     if llm is None:
         from src.report.generator import ReportGenerator
 
-        final_report = ReportGenerator().generate_report(dict(state))
+        final_report = ReportGenerator().generate_report(render_state)
         token_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
         cost_usd = 0.0
         logger.info("[report_node] report:template (no LLM configured)")
@@ -771,7 +767,7 @@ Be concise but specific. Use data and metrics from the expert results.
             logger.warning("[report_node] LLM report generation failed: %s", exc)
             from src.report.generator import ReportGenerator
 
-            final_report = ReportGenerator().generate_report(dict(state))
+            final_report = ReportGenerator().generate_report(render_state)
             token_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
             cost_usd = 0.0
 
@@ -787,31 +783,6 @@ Be concise but specific. Use data and metrics from the expert results.
             f"## Query\n{query}\n\n"
             f"*Report generation completed but output was filtered: {output_guard.reason}.*\n"
         )
-
-    # ── Episodic memory write-back (best-effort) ─────────────────────────
-    kpi_snapshot: dict[str, Any] = {}
-    for r in state.get("expert_results", []):
-        ek = r.get("kpis")
-        if isinstance(ek, dict):
-            kpi_snapshot.update(ek)
-    try:
-        import uuid as _uuid
-
-        from src.core.config import get_settings as _gs
-        from src.memory import MemoryStore
-
-        _store = MemoryStore(db_path=_gs().memory_db_path)
-        await _store.save_analysis(
-            analysis_id=f"wf:{_uuid.uuid4().hex[:12]}",
-            org_id=state.get("org_id", "default"),
-            query=query,
-            scope=state.get("scope") or "full",
-            report=final_report,
-            kpis=kpi_snapshot,
-        )
-        await _store.close()
-    except Exception as exc:
-        logger.debug("[report_node] Memory write-back unavailable: %s", exc)
 
     return {
         "final_report": final_report,

@@ -15,6 +15,7 @@ from typing import Any
 
 from langgraph.graph import END, StateGraph
 
+from src.graph.gate_node import kpi_gate_node
 from src.graph.nodes import (
     approval_node,
     evaluate_node,
@@ -124,6 +125,7 @@ def build_graph() -> StateGraph:
     graph.add_node("refine", refine_node)
     graph.add_node("approval", approval_node)
     graph.add_node("report", report_node)
+    graph.add_node("kpi_gate", kpi_gate_node)
 
     # Set entry point
     graph.set_entry_point("plan")
@@ -166,8 +168,9 @@ def build_graph() -> StateGraph:
         },
     )
 
-    # Report always goes to END
-    graph.add_edge("report", END)
+    # Report passes the reconciliation gate before leaving the graph
+    graph.add_edge("report", "kpi_gate")
+    graph.add_edge("kpi_gate", END)
 
     logger.info("[build_graph] StateGraph DAG wired successfully (not yet compiled)")
     return graph
@@ -214,7 +217,7 @@ async def run_analysis(
     budget: float | None = None,
     data_path: str | None = None,
     approval_required: bool = False,
-    thread_id: str = "default",
+    thread_id: str | None = None,
 ) -> dict[str, Any]:
     """Run a complete analysis through the StateGraph DAG.
 
@@ -239,13 +242,22 @@ async def run_analysis(
     """
     # Run-scoped cost attribution: every LLM call inside this context
     # (including worker threads) records to this run's tracker.
+    import uuid as _uuid
+
     from src.core.observability import trace_id_var
     from src.core.token_tracker import cost_scope
 
+    if not thread_id:
+        # Unique per run: a shared default thread leaked checkpointed state
+        # across "independent" runs (kpi_snapshot from a previous run bled
+        # into the next render). HITL callers pass an explicit stable id.
+        thread_id = _uuid.uuid4().hex[:12]
     trace_id_var.set(f"{org_id}:{thread_id}")
 
     async with cost_scope():
-        compiled_graph = await build_compiled_graph()
+        from src.graph.runtime import get_compiled_graph
+
+        compiled_graph = await get_compiled_graph("workflow")
 
         initial_state: AnalysisState = {
             "query": query,

@@ -45,6 +45,18 @@ def _replace_by_expert(
     return kept + new
 
 
+def _merge_by_key(
+    existing: list[dict[str, Any]],
+    new: list[dict[str, Any]],
+    key: str,
+) -> list[dict[str, Any]]:
+    """Merge list-of-dicts by a key field (upsert semantics)."""
+    out = {item.get(key, i): item for i, item in enumerate(existing)}
+    for i, item in enumerate(new):
+        out[item.get(key, f"_{i}")] = item
+    return list(out.values())
+
+
 class AnalysisState(TypedDict):
     """Graph state for the LangGraph StateGraph DAG.
 
@@ -65,22 +77,35 @@ class AnalysisState(TypedDict):
     # ── Planning ─────────────────────────────────────────────────────────
     plan: NotRequired[dict[str, Any] | None]
     selected_experts: NotRequired[list[str]]
+    # v9 planning pillar: structured subgoals.
+    # Each: {"expert": str, "question": str, "budget": float|None,
+    #        "status": "pending"|"done"|"failed"}
+    subgoals: Annotated[list[dict[str, Any]], lambda a, b: _merge_by_key(a, b, "expert")]
 
     # ── Execution ────────────────────────────────────────────────────────
     expert_results: Annotated[list[dict[str, Any]], _replace_by_expert]
     execution_errors: Annotated[list[str], operator.add]
 
-    # ── Evaluation ───────────────────────────────────────────────────────
+    # ── Evaluation / 对账闸门 ─────────────────────────────────────────────
     quality_scores: NotRequired[dict[str, Any] | None]
     needs_refinement: NotRequired[bool]
     refinement_round: NotRequired[int]
+    kpi_snapshot: NotRequired[dict[str, Any]]
+    kpi_gate_result: NotRequired[dict[str, Any] | None]
 
     # ── Approval ─────────────────────────────────────────────────────────
     approval_required: NotRequired[bool]
     approved: NotRequired[bool | None]
 
-    # ── Output ───────────────────────────────────────────────────────────
+    # ── Output / observability ───────────────────────────────────────────
     final_report: NotRequired[str | None]
     status: AnalysisStatus
     token_usage: NotRequired[dict[str, Any]]
     cost_usd: NotRequired[float]
+    # Visible degradation markers (tally discipline): plan:rule, eval:rule,
+    # report:template, kpi_gate:degraded, kpi_gate:annotated, agent_loop:capped
+    degradations: Annotated[list[str], operator.add]
+    # Per-node trace entries {"node", "dur_ms", "detail"} (diagnostic tier)
+    trace: Annotated[list[dict[str, Any]], operator.add]
+    # Agent-loop step quadruples {"thought","action","obs","gate"}
+    agent_steps: Annotated[list[dict[str, Any]], operator.add]

@@ -65,7 +65,7 @@ class UserSegmentor:
 
         # Ensure required columns
         for col, default in [
-            ("last_ride_date", pd.Timestamp.now()),
+            ("last_ride_date", pd.Timestamp("2026-01-01")),  # fixed demo anchor
             ("ride_count", 0),
             ("total_spent", 0.0),
         ]:
@@ -73,7 +73,8 @@ class UserSegmentor:
                 df[col] = default
 
         df["last_ride_date"] = pd.to_datetime(df["last_ride_date"], errors="coerce")
-        now = pd.Timestamp.now()
+        # As-of anchor (deterministic): latest observed activity + 1 day.
+        now = df["last_ride_date"].max() + pd.Timedelta(days=1)
         df["recency_days"] = (now - df["last_ride_date"]).dt.days.fillna(999).astype(int)
 
         # Score each dimension 1-5 using quantile binning.

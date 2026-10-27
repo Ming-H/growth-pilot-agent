@@ -28,6 +28,7 @@ from src.agent.chief import (
     _route_after_approval,
     _route_after_gate,
     agent_approval_node,
+    agent_plan_node,
     agent_report_node,
     agent_tools_node,
     chief_agent_node,
@@ -35,6 +36,7 @@ from src.agent.chief import (
     should_continue,
 )
 from src.agent.state import AgentState
+from src.graph.gate_node import kpi_gate_node
 from src.graph.state import AnalysisStatus
 
 logger = logging.getLogger(__name__)
@@ -58,22 +60,31 @@ async def guard_node(state: AgentState) -> dict:
 def _route_after_guard(state: AgentState) -> str:
     if state.get("status") == AnalysisStatus.FAILED:
         return END
-    return "agent"
+    return "plan"
 
 
 def build_agent_graph() -> StateGraph:
-    """Build (uncompiled) the agent-led StateGraph."""
+    """Build (uncompiled) the agent-led StateGraph.
+
+    Topology::
+
+        guard → plan → agent ⇄ tools → evaluate ─┬→ agent (feedback, bounded)
+                                                └→ approval → report → kpi_gate → END
+    """
     graph = StateGraph(AgentState)
 
     graph.add_node("guard", guard_node)
+    graph.add_node("plan", agent_plan_node)
     graph.add_node("agent", chief_agent_node)
     graph.add_node("tools", agent_tools_node)
     graph.add_node("evaluate", evaluate_gate_node)
     graph.add_node("approval", agent_approval_node)
     graph.add_node("report", agent_report_node)
+    graph.add_node("kpi_gate", kpi_gate_node)
 
     graph.set_entry_point("guard")
-    graph.add_conditional_edges("guard", _route_after_guard, {"agent": "agent", END: END})
+    graph.add_conditional_edges("guard", _route_after_guard, {"plan": "plan", END: END})
+    graph.add_edge("plan", "agent")
     graph.add_conditional_edges(
         "agent", should_continue, {"tools": "tools", "evaluate": "evaluate"}
     )
@@ -88,7 +99,8 @@ def build_agent_graph() -> StateGraph:
         _route_after_approval,
         {"report": "report", END: END},
     )
-    graph.add_edge("report", END)
+    graph.add_edge("report", "kpi_gate")
+    graph.add_edge("kpi_gate", END)
 
     logger.info("[build_agent_graph] agent-led StateGraph wired")
     return graph
@@ -112,14 +124,21 @@ async def run_agent_analysis(
     budget: float | None = None,
     data_path: str | None = None,
     approval_required: bool = False,
-    thread_id: str = "default",
+    thread_id: str | None = None,
 ) -> dict[str, Any]:
     """Run a complete agent-led analysis; returns the final AgentState dict."""
     # Run-scoped cost attribution (concurrent runs no longer share a
     # process-global tracker).
+    import uuid as _uuid
+
     from src.core.observability import trace_id_var
     from src.core.token_tracker import cost_scope
 
+    if not thread_id:
+        # Unique per run: a shared default thread leaked checkpointed state
+        # across "independent" runs (kpi_snapshot from a previous run bled
+        # into the next render). HITL callers pass an explicit stable id.
+        thread_id = _uuid.uuid4().hex[:12]
     trace_id_var.set(f"{org_id}:{thread_id}")
 
     initial_state: AgentState = {  # type: ignore[typeddict-item]
@@ -139,7 +158,9 @@ async def run_agent_analysis(
     config = {"configurable": {"thread_id": f"{org_id}:{thread_id}"}}
     try:
         async with cost_scope():
-            compiled = await build_compiled_agent_graph()
+            from src.graph.runtime import get_compiled_graph
+
+            compiled = await get_compiled_graph("agent")
             result = await compiled.ainvoke(initial_state, config=config)
     except Exception as exc:
         # In agent-led mode the LLM *is* the orchestrator — when it is not
