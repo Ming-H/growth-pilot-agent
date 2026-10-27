@@ -28,7 +28,7 @@ try:
         ElasticityEstimator,
         SubsidyAllocator,
     )
-except ImportError as _import_err:
+except (ImportError, OSError) as _import_err:
     import logging as _logging
 
     _logging.getLogger(__name__).warning("Tool import failed, using stubs: %s", _import_err)
@@ -51,7 +51,7 @@ except ImportError as _import_err:
 
 try:
     from src.tools.common.data_loader import DataLoader
-except ImportError:
+except (ImportError, OSError):
     DataLoader = None  # type: ignore[assignment,misc]
 
 

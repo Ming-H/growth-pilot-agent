@@ -103,6 +103,9 @@ class LTVPredictor:
             subsample=0.8,
             colsample_bytree=0.8,
             random_state=self.random_state,
+            deterministic=True,
+            force_row_wise=True,
+            num_threads=1,
             verbose=-1,
         )
         self._reg_model.fit(X_arr, y_arr)

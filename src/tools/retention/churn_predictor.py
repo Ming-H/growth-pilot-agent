@@ -103,6 +103,9 @@ class ChurnPredictor:
             colsample_bytree=self.colsample_bytree,
             scale_pos_weight=spw,
             random_state=self.random_state,
+            deterministic=True,
+            force_row_wise=True,
+            num_threads=1,
             verbose=-1,
         )
 
@@ -126,6 +129,9 @@ class ChurnPredictor:
                     colsample_bytree=self.colsample_bytree,
                     scale_pos_weight=spw,
                     random_state=self.random_state,
+            deterministic=True,
+            force_row_wise=True,
+            num_threads=1,
                     verbose=-1,
                 )
                 clone.fit(X_tr, y_tr)

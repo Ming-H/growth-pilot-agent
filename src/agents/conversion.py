@@ -23,7 +23,7 @@ try:
     from src.tools.conversion.reach_planner import ReachPlanner
     from src.tools.conversion.seasonal_analyzer import SeasonalAnalyzer
     from src.tools.conversion.slot_allocator import SlotAllocator
-except ImportError as _import_err:
+except (ImportError, OSError) as _import_err:
     import logging as _logging
 
     _logging.getLogger(__name__).warning("Tool import failed, using stubs: %s", _import_err)

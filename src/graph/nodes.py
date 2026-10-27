@@ -112,7 +112,11 @@ def _clear_expert_cache() -> None:
 
 
 def _create_expert(expert_key: str) -> Any:
-    """Create (or retrieve cached) expert instance with TTL-based expiration."""
+    """Create (or retrieve cached) expert instance with TTL-based expiration.
+
+    When no LLM is configured the expert gets ``llm=None`` and runs the
+    deterministic pipeline with a degraded summary — the zero-key brain.
+    """
     import time
 
     now = time.monotonic()
@@ -120,9 +124,10 @@ def _create_expert(expert_key: str) -> Any:
     if expert_key in _expert_cache and (now - cached_time) < _cache_ttl:
         return _expert_cache[expert_key]
 
+    from src.core.config import get_settings
     from src.core.llm_factory import create_resilient_llm
 
-    llm = create_resilient_llm(role="default")
+    llm = create_resilient_llm(role="default") if get_settings().llm_available else None
     cls = _get_expert_cls(expert_key)
     expert = cls(llm=llm)
     _expert_cache[expert_key] = expert
@@ -204,8 +209,26 @@ async def plan_node(state: AnalysisState) -> dict:  # noqa: D401
         )
         memory_block = f"\nRelevant prior analyses for this org (use as context):\n{prior}\n"
 
+
+    llm = create_resilient_llm(role="default", agent_name="plan_node")
+
+    # ── Zero-key path: keyword routing, no LLM call ──────────────────────
+    if llm is None:
+        selected_experts = _intent_classify(query)
+        logger.info("[plan_node] plan:rule (no LLM) — selected %s", selected_experts)
+        return {
+            "plan": {
+                "reasoning": "rule-based intent classification (no LLM configured)",
+                "experts": selected_experts,
+                "context_summary": query[:100],
+                "source": "rule",
+                "memory_context": memory_context,
+            },
+            "selected_experts": selected_experts,
+            "status": AnalysisStatus.EXECUTING,
+        }
+
     try:
-        llm = create_resilient_llm(role="default", agent_name="plan_node")
         prompt = PLAN_PROMPT.format(query=query, scope=scope or "full") + memory_block
         response = await llm.ainvoke(prompt)
         content = response.content if hasattr(response, "content") else str(response)
@@ -233,7 +256,7 @@ async def plan_node(state: AnalysisState) -> dict:  # noqa: D401
         )
 
         return {
-            "plan": {**plan_data, "memory_context": memory_context},
+            "plan": {**plan_data, "source": "llm", "memory_context": memory_context},
             "selected_experts": selected_experts,
             "status": AnalysisStatus.EXECUTING,
         }
@@ -246,6 +269,7 @@ async def plan_node(state: AnalysisState) -> dict:  # noqa: D401
                 "reasoning": f"LLM planning failed ({exc}); intent classify fallback",
                 "experts": selected_experts,
                 "context_summary": query[:100],
+                "source": "rule",
                 "memory_context": memory_context,
             },
             "selected_experts": selected_experts,
@@ -258,21 +282,30 @@ def _intent_classify(query: str) -> list[str]:
 
     Uses each ExpertAgentBase subclass's domain-specific keyword matching
     instead of a centralized keyword map. Falls back to all experts if
-    none score above the threshold.
+    none score above the threshold. Each expert class is imported in its
+    own guard — a broken native lib (OSError, not just ImportError) must
+    degrade that expert, never crash the router (A8).
     """
-    from src.agents.ad import AdExpert
-    from src.agents.conversion import ConversionExpert
-    from src.agents.prospect import ProspectExpert
-    from src.agents.retention import RetentionExpert
-    from src.agents.subsidy import SubsidyExpert
+    import importlib
 
-    experts = [
-        ("prospect", ProspectExpert),
-        ("conversion", ConversionExpert),
-        ("subsidy", SubsidyExpert),
-        ("retention", RetentionExpert),
-        ("ad", AdExpert),
-    ]
+    expert_classes: dict[str, type] = {}
+    for key, path in [
+        ("prospect", "src.agents.prospect.ProspectExpert"),
+        ("conversion", "src.agents.conversion.ConversionExpert"),
+        ("subsidy", "src.agents.subsidy.SubsidyExpert"),
+        ("retention", "src.agents.retention.RetentionExpert"),
+        ("ad", "src.agents.ad.AdExpert"),
+    ]:
+        try:
+            module_path, class_name = path.rsplit(".", 1)
+            expert_classes[key] = getattr(importlib.import_module(module_path), class_name)
+        except Exception as exc:  # ImportError AND OSError from native deps
+            logger.warning("[_intent_classify] %s unavailable: %s", key, exc)
+
+    experts = list(expert_classes.items())
+    if not experts:  # nothing importable at all — pathological, but never crash
+        logger.warning("[_intent_classify] no experts importable")
+        return []
 
     scores = []
     for key, cls in experts:
@@ -425,14 +458,41 @@ async def evaluate_node(state: AnalysisState) -> dict:  # noqa: D401
         else:
             expert_results_dict[key] = item
 
+    # ── Zero-key path: deterministic scoring, no LLM judge ────────────────
+    # Re-running a degraded pipeline via refine cannot improve anything
+    # without a brain, so needs_refinement stays False.
+    from src.core.config import get_settings
+
+    settings = get_settings()
+    if not settings.llm_available:
+        rule_scores: dict[str, Any] = {}
+        for key, item in expert_results_dict.items():
+            kpis = item.get("kpis") or {}
+            coverage = min(1.0, len(kpis) / 3) if kpis else 0.0
+            rule_scores[key] = {
+                "completeness": coverage,
+                "actionability": coverage,
+                "data_grounding": 1.0 if kpis else 0.3,
+                "overall": round((coverage + coverage + (1.0 if kpis else 0.3)) / 3, 2),
+                "reasoning": "deterministic scoring (no LLM configured)",
+                "evaluation_mode": "rule",
+            }
+        quality_scores_dicts = {**rule_scores, **failed_scores}
+        logger.info(
+            "[evaluate_node] eval:rule scores=%s",
+            {k: v["overall"] for k, v in rule_scores.items()},
+        )
+        return {
+            "quality_scores": quality_scores_dicts,
+            "needs_refinement": False,
+            "refinement_round": state.get("refinement_round", 0),
+            "status": AnalysisStatus.EVALUATING,
+        }
+
     quality_scores = await batch_evaluate(expert_results_dict, query)
     quality_scores_dicts = {k: v.model_dump() for k, v in quality_scores.items()}
     quality_scores_dicts.update(failed_scores)
 
-    # Determine if any expert scored below threshold
-    from src.core.config import get_settings
-
-    settings = get_settings()
     needs_refinement = any(
         score.overall < settings.quality_threshold for score in quality_scores.values()
     )
@@ -659,32 +719,41 @@ Generate a structured report in Markdown with these sections:
 Be concise but specific. Use data and metrics from the expert results.
 """
 
-    try:
-        # Final synthesis reasons across all expert outputs — the strongest
-        # tier is reserved for this step (see Settings.model_tiers).
-        llm = create_resilient_llm(role="power", agent_name="report_node")
-        response = await llm.ainvoke(report_prompt)
-        final_report = response.content if hasattr(response, "content") else str(response)
-
-        from src.core.token_tracker import get_cost_tracker
-
-        cost_report = get_cost_tracker().report()
-        token_usage = {
-            "input_tokens": cost_report["input_tokens"],
-            "output_tokens": cost_report["output_tokens"],
-            "total_tokens": cost_report["total_tokens"],
-        }
-        cost_usd = cost_report["total_cost_usd"]
-
-    except Exception as exc:
-        logger.warning("[report_node] LLM report generation failed: %s", exc)
-        # Deterministic fallback: the template-based ReportGenerator renders
-        # expert results without an LLM, so a report is always produced.
+    # Final synthesis uses the power role across all expert outputs. When
+    # no LLM is configured (or synthesis fails) the deterministic template
+    # ReportGenerator renders expert results — a report is always produced.
+    llm = create_resilient_llm(role="power", agent_name="report_node")
+    if llm is None:
         from src.report.generator import ReportGenerator
 
         final_report = ReportGenerator().generate_report(dict(state))
         token_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
         cost_usd = 0.0
+        logger.info("[report_node] report:template (no LLM configured)")
+    else:
+        try:
+            response = await llm.ainvoke(report_prompt)
+            final_report = (
+                response.content if hasattr(response, "content") else str(response)
+            )
+
+            from src.core.token_tracker import get_cost_tracker
+
+            cost_report = get_cost_tracker().report()
+            token_usage = {
+                "input_tokens": cost_report["input_tokens"],
+                "output_tokens": cost_report["output_tokens"],
+                "total_tokens": cost_report["total_tokens"],
+            }
+            cost_usd = cost_report["total_cost_usd"]
+
+        except Exception as exc:
+            logger.warning("[report_node] LLM report generation failed: %s", exc)
+            from src.report.generator import ReportGenerator
+
+            final_report = ReportGenerator().generate_report(dict(state))
+            token_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+            cost_usd = 0.0
 
     # ── Output guardrail ─────────────────────────────────────────────────
     from src.guardrails.output_guard import validate_output

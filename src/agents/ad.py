@@ -18,7 +18,7 @@ try:
     from src.tools.ad.bid_optimizer import BidOptimizer
     from src.tools.ad.creative_analyzer import CreativeAnalyzer
     from src.tools.ad.rta_strategy import RTAStrategy
-except ImportError as _import_err:
+except (ImportError, OSError) as _import_err:
     import logging as _logging
 
     _logging.getLogger(__name__).warning("Tool import failed, using stubs: %s", _import_err)

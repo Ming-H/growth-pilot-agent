@@ -19,7 +19,7 @@ try:
     from src.tools.prospect.ltv_predictor import LTVPredictor
     from src.tools.prospect.segmentor import UserSegmentor
     from src.tools.prospect.user_scorer import UserScorer
-except ImportError as _import_err:
+except (ImportError, OSError) as _import_err:
     import logging as _logging
 
     _logging.getLogger(__name__).warning("Tool import failed, using stubs: %s", _import_err)

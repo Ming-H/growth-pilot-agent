@@ -68,9 +68,9 @@ class TestChannelDetection:
     def test_llm_available_remote_needs_key(self):
         s = _make_settings(llm_api_key="", demo_mode=False)
         assert s.llm_available is False
-        # ... unless demo mode tolerates it
+        # demo mode does NOT fake availability (honest degradation instead)
         s = _make_settings(llm_api_key="", demo_mode=True)
-        assert s.llm_available is True
+        assert s.llm_available is False
 
 
 # ---------------------------------------------------------------------------

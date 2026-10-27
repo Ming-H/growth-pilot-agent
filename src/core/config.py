@@ -180,12 +180,13 @@ class Settings(BaseSettings):
         """Whether an LLM brain is configured.
 
         Local endpoints are key-free (always available config-wise; runtime
-        failures degrade point-wise). Remote endpoints need a key — except
-        in demo mode, which tolerates a missing key for offline runs.
+        failures degrade point-wise). Remote endpoints need a key — demo
+        mode does NOT fake availability: a keyless remote endpoint would
+        only fail at call time (the v8 dishonesty this replaces).
         """
         if self.channel == "local":
             return True
-        return bool(self.llm_api_key) or self.demo_mode
+        return bool(self.llm_api_key)
 
     @property
     def ollama_native(self) -> bool:

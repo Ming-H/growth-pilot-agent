@@ -123,6 +123,7 @@ class ExpertAgentBase(BaseAgent):
                 return {"success": False, "errors": ["Invalid JSON params"]}
 
         errors: list[str] = []
+        degraded: list[str] = []
 
         # Run deterministic pipeline (offloaded to thread to avoid blocking the event loop)
         try:
@@ -134,7 +135,8 @@ class ExpertAgentBase(BaseAgent):
             errors.append(f"Pipeline: {exc}")
             results = {}
 
-        # Optional LLM synthesis (uses BaseAgent._invoke_llm with middleware)
+        # LLM synthesis: present → interpret; absent → deterministic summary.
+        # Absence of a brain is a mode (degraded), not a failure.
         if self.llm:
             try:
                 prompt = self._build_synthesis_prompt(params, results)
@@ -143,17 +145,55 @@ class ExpertAgentBase(BaseAgent):
                 results["analysis"] = analysis
             except Exception as exc:
                 logger.warning("[%s] LLM synthesis failed: %s", self.name, exc)
-                results["analysis"] = {"summary": f"LLM synthesis unavailable: {exc}"}
-                errors.append(f"LLM synthesis: {exc}")
+                results["analysis"] = {
+                    "summary": self._deterministic_summary(results),
+                    "degraded": True,
+                }
+                degraded.append("llm_synthesis")
+        else:
+            results["analysis"] = {
+                "summary": self._deterministic_summary(results),
+                "degraded": True,
+            }
+            degraded.append("llm_synthesis")
 
         if errors:
             results["errors"] = errors
+        if degraded:
+            results["degraded"] = degraded
 
         # Explicit success contract: downstream nodes (evaluate/refine/report)
         # check this flag instead of relying on key absence.
         results["success"] = not errors
 
         return results
+
+    # ------------------------------------------------------------------
+    # Deterministic summary (zero-key degradation path)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _deterministic_summary(results: dict) -> str:
+        """Render a one-line deterministic summary from pipeline KPIs.
+
+        Used when no LLM is configured (zero-key mode) or synthesis fails.
+        Experts may override for nicer domain-specific phrasing; the default
+        renders ``k=v`` pairs so every number stays tool-traceable.
+        """
+        kpis = results.get("kpis") or {}
+        if kpis:
+            rendered = "; ".join(
+                f"{k}={ExpertAgentBase._fmt_num(v)}" for k, v in list(kpis.items())[:10]
+            )
+            return f"确定性管线结果（无 LLM 解读）: {rendered}"
+        return "确定性管线完成（无 KPI 产出，详见结构化结果）"
+
+    @staticmethod
+    def _fmt_num(v: Any) -> str:
+        """Format a number compactly for deterministic summaries."""
+        if isinstance(v, float):
+            return f"{v:.4f}" if abs(v) < 1 else f"{v:,.2f}"
+        return str(v)
 
     # ------------------------------------------------------------------
     # Shared utility: safe tool execution
