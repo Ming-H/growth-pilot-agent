@@ -308,6 +308,24 @@ async def chief_agent_node(state: AgentState) -> dict:
         history = [HumanMessage(content=state.get("query", "")), *history]
 
     response = await bound.ainvoke([system, *history])
+
+    # Weak-model flip (chief_tools:weak): a local small model whose first
+    # turns produce no valid tool calls is escorted to the heuristic brain —
+    # pending subgoals get dispatched deterministically instead of looping.
+    if settings.channel == "local" and not response.tool_calls:
+        prior_llm_steps = [s for s in (state.get("agent_steps") or []) if s.get("gate") == "llm"]
+        if len(prior_llm_steps) >= 1 and _pending_subgoals(state):
+            logger.warning(
+                "[chief_agent] local model produced no tool calls (%d steps) — "
+                "switching to heuristic brain",
+                len(prior_llm_steps) + 1,
+            )
+            degradations.append("chief_tools:weak")
+            response = _heuristic_brain_message(state)
+            if not response.tool_calls:
+                response = AIMessage(
+                    content="# 启发式大脑汇总\n\n（确定性模式：见 KPI 快照与结构化结果）"
+                )
     thought = str(response.content or "")[:160]
     dur_ms = round((_time.monotonic() - started) * 1000)
     logger.info(

@@ -59,7 +59,12 @@ class MemorySearchArgs(BaseModel):
 
 
 class ToolSpec:
-    """A tool exposed to the Chief Agent: schema + state-aware handler."""
+    """A tool exposed to the Chief Agent: schema + state-aware handler.
+
+    ACI discipline: a tool spec is the contract between the LLM and the
+    action space — it must say what the tool is for, when to call it, and
+    how it fails, so the model can self-correct without a stack trace.
+    """
 
     def __init__(
         self,
@@ -67,11 +72,13 @@ class ToolSpec:
         description: str,
         args_schema: type[BaseModel],
         handler: Callable[..., Any],
+        failure_modes: list[str] | None = None,
     ) -> None:
         self.name = name
         self.description = description
         self.args_schema = args_schema
         self.handler = handler
+        self.failure_modes = failure_modes or []
 
 
 # ---------------------------------------------------------------------------
@@ -168,27 +175,53 @@ async def _search_memory_tool(state: dict[str, Any], query: str) -> dict[str, An
 # Spec registry
 # ---------------------------------------------------------------------------
 
+# ACI-style self-describing tool metadata: purpose / when-to-call /
+# required-args / failure-modes. The failure-modes section is what lets the
+# chief agent interpret a failed call without seeing a stack trace.
 EXPERT_TOOL_DESCRIPTIONS: dict[str, str] = {
     "prospect": (
-        "潜客识别专家：用户意向预测(LightGBM)、用户评分排序、RFM 分群、LTV 预测(BG/NBD)。"
-        "当问题涉及拉新、高潜用户、用户价值时调用。"
+        "【用途】潜客识别：用户意向预测(LightGBM)、评分排序、RFM 分群、LTV 预测(BG/NBD)。"
+        "【何时调用】问题涉及拉新、高潜用户、用户价值、分群时。"
+        "【参数】query=具体分析问题。"
+        "【失败模式】特征数据缺失时退化为合成演示数据（结果标注 data_source）；"
+        "LTV 拟合不收敛时返回启发式估值。"
     ),
     "conversion": (
-        "转化优化专家：漏斗分析、触达规划、投放位分配、优惠券设计、多触点归因。"
-        "当问题涉及转化率、漏斗瓶颈、触达策略时调用。"
+        "【用途】转化优化：漏斗分析、触达规划、投放位分配、优惠券设计、多触点归因。"
+        "【何时调用】问题涉及转化率、漏斗瓶颈、触达策略、归因时。"
+        "【参数】query=具体分析问题。"
+        "【失败模式】漏斗数据为空时返回空结果并说明；预算不足时优惠券设计收缩规模。"
     ),
     "subsidy": (
-        "补贴策略专家：因果推断(DoWhy ATE/CATE)、价格弹性、整数规划预算优化(PuLP)。"
-        "当问题涉及补贴效果、预算分配、ROI 时调用（必须提供 budget 参数）。"
+        "【用途】补贴策略：因果推断 ATE/CATE(statsmodels 后门调整/IPW)、价格弹性、"
+        "整数规划预算优化(HiGHS)。"
+        "【何时调用】问题涉及补贴效果、预算分配、ROI 时。"
+        "【参数】query + budget（必须提供，单位 CNY）。"
+        "【失败模式】无实验数据时 ATE 退化为历史经验值并标注 heuristic；"
+        "求解器不可用时退化为贪心分配（method 字段标明）。"
     ),
     "retention": (
-        "留存召回专家：流失预警(LightGBM)、同期群分析、新客养成、流失召回策略。"
-        "当问题涉及流失、留存、召回时调用。"
+        "【用途】留存召回：流失预警(LightGBM)、同期群分析、新客养成、流失召回策略。"
+        "【何时调用】问题涉及流失、留存、召回、用户生命周期时。"
+        "【参数】query=具体分析问题。"
+        "【失败模式】数据不足时流失模型 AUC 不可靠（结果带 train_auc 供校验）；"
+        "召回计划退化为固定分层模板。"
     ),
     "ad": (
-        "广告投放专家：RTA 策略、OCPX 出价优化、创意疲劳检测、受众定向。"
-        "当问题涉及投放、出价、CPA、创意时调用。"
+        "【用途】广告投放：RTA 策略、OCPX 出价优化、创意疲劳检测、受众定向。"
+        "【何时调用】问题涉及投放、出价、CPA、创意、受众扩展时。"
+        "【参数】query=具体分析问题。"
+        "【失败模式】当前版本始终使用内置合成数据（data_source=synthetic，"
+        "忽略 data_path）——接入真实广告平台数据在路线图中。"
     ),
+}
+
+EXPERT_TOOL_FAILURE_MODES: dict[str, list[str]] = {
+    "prospect": ["synthetic_data_fallback", "ltv_fit_degenerate"],
+    "conversion": ["empty_funnel_data", "budget_exhausted"],
+    "subsidy": ["heuristic_ate_fallback", "greedy_allocation_fallback"],
+    "retention": ["low_auc_warning", "template_winback_fallback"],
+    "ad": ["synthetic_data_only"],
 }
 
 
@@ -204,6 +237,7 @@ def build_tool_specs() -> list[ToolSpec]:
                 handler=lambda state, query, budget=None, _k=expert_key: _run_expert_tool(
                     state, _k, query, budget
                 ),
+                failure_modes=EXPERT_TOOL_FAILURE_MODES.get(expert_key),
             )
         )
     specs.append(

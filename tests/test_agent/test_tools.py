@@ -88,3 +88,28 @@ class TestExecuteToolCall:
                 {"org_id": "o"}, "search_memory", {"query": "补贴"}
             )
         assert result["found"] == 0
+
+
+class TestACIToolSpecs:
+    def test_descriptions_are_self_describing(self):
+        from src.agent.tools import build_tool_specs
+
+        for spec in build_tool_specs():
+            assert "用途" in spec.description or "检索" in spec.description
+            if spec.name.startswith("run_"):
+                assert "失败模式" in spec.description, f"{spec.name} must document failure modes"
+                assert spec.failure_modes, f"{spec.name} needs structured failure_modes"
+
+    def test_subsidy_documents_budget_requirement(self):
+        from src.agent.tools import build_tool_specs
+
+        subsidy = next(s for s in build_tool_specs() if s.name == "run_subsidy_analysis")
+        assert "budget" in subsidy.description
+
+
+class TestAdDataHonesty:
+    def test_ad_result_marks_synthetic_source(self):
+        from src.agents.ad import AdExpert
+
+        result = AdExpert(llm=None)._execute_pipeline({"query": "广告", "budget": 0})
+        assert result.get("data_source") == "synthetic"

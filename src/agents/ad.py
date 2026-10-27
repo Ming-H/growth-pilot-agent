@@ -56,6 +56,12 @@ class AdExpert(ExpertAgentBase):
         }
 
     def _execute_pipeline(self, params: dict) -> dict:
+        """Run the ad pipeline.
+
+        NOTE: runs on synthetic demo data regardless of ``data_path`` — the
+        result carries ``data_source: "synthetic"`` so downstream consumers
+        (LLM synthesis, report) cannot mistake it for real ad spend.
+        """
         """Run the deterministic tool pipeline. Returns raw results dict."""
         errors: list[str] = []
 
@@ -129,6 +135,10 @@ class AdExpert(ExpertAgentBase):
 
         rta_metrics = rta_result.get("overall_metrics", {})
         return {
+            # Honesty marker: the ad pipeline runs on in-file synthetic data
+            # and ignores data_path (real ad-platform connectors are on the
+            # roadmap) — reports must never present this as real spend.
+            "data_source": "synthetic",
             "rta_rules": rta_rules,
             "rta_metrics": rta_metrics,
             "bid_result": bid_result,
