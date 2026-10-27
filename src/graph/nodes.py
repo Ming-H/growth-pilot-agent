@@ -176,22 +176,28 @@ async def plan_node(state: AnalysisState) -> dict:  # noqa: D401
     # Best-effort: memory unavailability must never block an analysis.
     memory_context: list[dict[str, Any]] = []
     try:
-        from src.core.config import _memory_dir
-        from src.memory.manager import MemoryManager
+        from src.core.config import get_settings
+        from src.memory import MemoryStore
 
-        memory = MemoryManager(
-            base_path=_memory_dir(),
-            org_id=state.get("org_id", "default"),
-        )
-        for hit in memory.search(query, limit=3):
-            summary = hit.get("results_summary", "")
-            if isinstance(summary, dict):
-                summary = str(summary.get("summary", summary))
+        store = MemoryStore(db_path=get_settings().memory_db_path)
+        hits = await store.search_analyses(state.get("org_id", "default"), query, limit=3)
+        # L2 aliases steer keyword routing with org vocabulary
+        alias_hits = await store.resolve_aliases(state.get("org_id", "default"), query)
+        if alias_hits.get("expert"):
+            memory_context.append(
+                {
+                    "query": "",
+                    "scope": "alias",
+                    "summary": f"org 别名命中专家: {sorted(alias_hits['expert'])}",
+                    "alias_experts": sorted(alias_hits["expert"]),
+                }
+            )
+        for hit in hits:
             memory_context.append(
                 {
                     "query": str(hit.get("query", ""))[:120],
                     "scope": hit.get("scope", ""),
-                    "summary": str(summary)[:300],
+                    "summary": str(hit.get("results_summary", ""))[:300],
                 }
             )
         if memory_context:
@@ -199,6 +205,7 @@ async def plan_node(state: AnalysisState) -> dict:  # noqa: D401
                 "[plan_node] Injected %d memory entr(ies) into planning context",
                 len(memory_context),
             )
+        await store.close()
     except Exception as exc:
         logger.debug("[plan_node] Memory retrieval unavailable: %s", exc)
 
@@ -208,7 +215,6 @@ async def plan_node(state: AnalysisState) -> dict:  # noqa: D401
             f"  - [{m['scope']}] {m['query']} -> {m['summary']}" for m in memory_context
         )
         memory_block = f"\nRelevant prior analyses for this org (use as context):\n{prior}\n"
-
 
     llm = create_resilient_llm(role="default", agent_name="plan_node")
 
@@ -407,6 +413,22 @@ async def execute_node(state: AnalysisState) -> dict:  # noqa: D401
             result = _validate_expert_result(expert_key, result)
 
             expert_results.append(result)
+
+    # ── L1 fact ledger write-back (gated: success ∧ validated ∧ kpis) ────
+    try:
+        from src.core.config import get_settings as _gs
+        from src.memory import MemoryStore
+
+        _store = MemoryStore(db_path=_gs().memory_db_path)
+        for res in expert_results:
+            n = await _store.record_facts(
+                state.get("org_id", "default"), res, run_fingerprint=str(budget)
+            )
+            if n:
+                logger.debug("[execute_node] L1 ledger +%d facts (%s)", n, res.get("expert"))
+        await _store.close()
+    except Exception as exc:
+        logger.debug("[execute_node] L1 ledger unavailable: %s", exc)
 
     return {
         "expert_results": expert_results,
@@ -733,9 +755,7 @@ Be concise but specific. Use data and metrics from the expert results.
     else:
         try:
             response = await llm.ainvoke(report_prompt)
-            final_report = (
-                response.content if hasattr(response, "content") else str(response)
-            )
+            final_report = response.content if hasattr(response, "content") else str(response)
 
             from src.core.token_tracker import get_cost_tracker
 
@@ -768,8 +788,34 @@ Be concise but specific. Use data and metrics from the expert results.
             f"*Report generation completed but output was filtered: {output_guard.reason}.*\n"
         )
 
+    # ── Episodic memory write-back (best-effort) ─────────────────────────
+    kpi_snapshot: dict[str, Any] = {}
+    for r in state.get("expert_results", []):
+        ek = r.get("kpis")
+        if isinstance(ek, dict):
+            kpi_snapshot.update(ek)
+    try:
+        import uuid as _uuid
+
+        from src.core.config import get_settings as _gs
+        from src.memory import MemoryStore
+
+        _store = MemoryStore(db_path=_gs().memory_db_path)
+        await _store.save_analysis(
+            analysis_id=f"wf:{_uuid.uuid4().hex[:12]}",
+            org_id=state.get("org_id", "default"),
+            query=query,
+            scope=state.get("scope") or "full",
+            report=final_report,
+            kpis=kpi_snapshot,
+        )
+        await _store.close()
+    except Exception as exc:
+        logger.debug("[report_node] Memory write-back unavailable: %s", exc)
+
     return {
         "final_report": final_report,
+        "kpi_snapshot": kpi_snapshot,
         "token_usage": token_usage,
         "cost_usd": cost_usd,
         "status": AnalysisStatus.COMPLETED,

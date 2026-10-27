@@ -81,7 +81,9 @@ class TestExecuteToolCall:
     @pytest.mark.asyncio
     async def test_memory_search_never_raises(self):
         """Memory unavailable degrades to found=0, not an exception."""
-        with patch("src.memory.manager.MemoryManager.search", side_effect=RuntimeError("no fs")):
+        with patch(
+            "src.memory.store.MemoryStore.search_analyses", side_effect=RuntimeError("no fs")
+        ):
             result = await execute_tool_call_async(
                 {"org_id": "o"}, "search_memory", {"query": "补贴"}
             )

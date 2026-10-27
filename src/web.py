@@ -50,7 +50,7 @@ from src.core.config import get_settings
 from src.core.observability import setup_telemetry
 from src.db.database import get_db, init_db
 from src.db.models import Analysis, Organization, User
-from src.memory.manager import MemoryManager
+from src.memory import MemoryStore
 
 # Rate limiting (optional -- graceful degradation if slowapi is not installed)
 try:
@@ -72,19 +72,21 @@ logger = logging.getLogger(__name__)
 # Globals (initialized in lifespan)
 # ---------------------------------------------------------------------------
 
-_memory_cache: dict[str, MemoryManager] = {}
+# Single process-wide MemoryStore (SQLite handles per-org rows natively).
+_memory_store: MemoryStore | None = None
 
 # Cached compiled graph for human-in-the-loop endpoints.
 # Built lazily on first access so that the import-time cost is deferred.
 _compiled_graph: Any | None = None
 
 
-def _get_memory(org_id: str) -> MemoryManager:
-    """Return a per-org MemoryManager instance (cached)."""
-    if org_id not in _memory_cache:
+def _get_memory() -> MemoryStore:
+    """Return the process-wide MemoryStore instance (lazy, cached)."""
+    global _memory_store
+    if _memory_store is None:
         settings = get_settings()
-        _memory_cache[org_id] = MemoryManager(base_path=settings.memory_base_path, org_id=org_id)
-    return _memory_cache[org_id]
+        _memory_store = MemoryStore(db_path=settings.memory_db_path)
+    return _memory_store
 
 
 async def _get_graph() -> Any:
@@ -386,19 +388,8 @@ async def analyze(
     analysis.completed_at = datetime.now(timezone.utc)
     await db.flush()
 
-    # Also store in memory for backward compatibility
-    try:
-        memory = _get_memory(user.org_id)
-        scope = state.get("scope", "full")
-        summary = state.get("analysis_summary", "")
-        await memory.astore(
-            run_id=analysis.id,
-            query=request.query,
-            scope=scope,
-            results_summary=summary,
-        )
-    except Exception as exc:
-        logger.warning("Failed to store analysis in memory: %s", exc)
+    # Memory write-back (graph nodes already record facts/analysis; this
+    # legacy path persisted a free-text summary — superseded by the store).
 
     # Increment usage count after successful analysis
     if org:
@@ -618,19 +609,8 @@ async def analyze_stream(
                     analysis_obj.completed_at = datetime.now(timezone.utc)
                     await update_db.commit()
 
-            # Store in memory for backward compatibility
-            try:
-                memory = _get_memory(user.org_id)
-                scope = state.get("scope", "full")
-                summary = state.get("analysis_summary", "")
-                await memory.astore(
-                    run_id=analysis_id,
-                    query=request.query,
-                    scope=scope,
-                    results_summary=summary,
-                )
-            except Exception as exc:
-                logger.warning("Memory store failed in stream: %s", exc)
+            # Memory write-back happens in the graph nodes (L1 facts +
+            # episodic analysis) — no free-text duplicate here.
 
             # Increment usage count after successful stream analysis
             if org:

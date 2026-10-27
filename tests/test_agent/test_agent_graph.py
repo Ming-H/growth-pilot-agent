@@ -203,7 +203,6 @@ class TestGraphEndToEnd:
 
         high = QualityScore(completeness=0.9, actionability=0.9, data_grounding=0.9, overall=0.9)
 
-        mock_store = MagicMock()
         with (
             patch("src.core.llm_factory.create_llm", return_value=fake_llm),
             patch(
@@ -218,7 +217,10 @@ class TestGraphEndToEnd:
                 "src.guardrails.output_guard.validate_output",
                 return_value=MagicMock(passed=True),
             ),
-            patch("src.memory.manager.MemoryManager.store", mock_store),
+            patch(
+                "src.memory.store.MemoryStore.save_analysis",
+                new=AsyncMock(),
+            ) as mock_store,
         ):
             graph = build_agent_graph()
             compiled = graph.compile()

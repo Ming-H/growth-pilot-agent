@@ -1,12 +1,9 @@
-"""Memory system for GrowthPilot - persistent cross-session memory.
+"""Memory system for GrowthPilot — three-layer SQLite store (v9).
 
-Provides:
-  - MemoryManager: High-level API with automatic backend selection
-    (ChromaDB + embeddings when available, TF-IDF file fallback otherwise).
-  - VectorMemoryStore: Low-level ChromaDB vector store (optional dependency).
-  - get_embeddings / is_fallback: Embedding provider utilities.
+- MemoryStore: async L0 sessions / L1 verified-fact ledger / L2 aliases,
+  plus episodic FTS5+LIKE RRF search over past analyses.
 """
 
-from src.memory.manager import MemoryManager
+from src.memory.store import MemoryStore
 
-__all__ = ["MemoryManager"]
+__all__ = ["MemoryStore"]

@@ -1,8 +1,20 @@
-"""Shared pytest fixtures for growth-pilot-agent tests."""
+"""Shared pytest fixtures and environment.
+
+NOTE: the thread env vars below are set BEFORE any scientific-stack import
+(the determinism invariant — byte-identical zero-key reports — requires
+single-threaded BLAS/OpenMP reduction order; see tests/test_graph/test_zero_key.py).
+"""
 
 from __future__ import annotations
 
 import os
+
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -76,7 +88,7 @@ def enriched_state(sample_state: dict[str, Any]) -> dict[str, Any]:
 
 @pytest.fixture
 def tmp_memory_dir(tmp_path: Path) -> Path:
-    """Create a temporary directory for MemoryManager persistence tests."""
+    """Create a temporary directory for MemoryStore persistence tests."""
     mem_dir = tmp_path / "memory"
     mem_dir.mkdir()
     return mem_dir

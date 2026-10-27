@@ -129,17 +129,21 @@ def _run_expert_tool(
     return digest
 
 
-def _search_memory_tool(state: dict[str, Any], query: str) -> dict[str, Any]:
-    """Retrieve prior analyses for this organisation (best-effort)."""
-    try:
-        from src.core.config import _memory_dir
-        from src.memory.manager import MemoryManager
+async def _search_memory_tool(state: dict[str, Any], query: str) -> dict[str, Any]:
+    """Retrieve prior analyses + verified facts for this org (best-effort).
 
-        memory = MemoryManager(
-            base_path=_memory_dir(),
-            org_id=state.get("org_id", "default"),
-        )
-        hits = memory.search(query, limit=3)
+    Episodic search over past analyses plus the L1 fact ledger — numbers
+    the agent may cite (the KPI gate still verifies the final report).
+    """
+    try:
+        from src.core.config import get_settings
+        from src.memory import MemoryStore
+
+        store = MemoryStore(db_path=get_settings().memory_db_path)
+        org_id = state.get("org_id", "default")
+        hits = await store.search_analyses(org_id, query, limit=3)
+        facts = await store.search_facts(org_id, limit=10)
+        await store.close()
         return {
             "found": len(hits),
             "entries": [
@@ -149,6 +153,10 @@ def _search_memory_tool(state: dict[str, Any], query: str) -> dict[str, Any]:
                     "summary": str(h.get("results_summary", ""))[:300],
                 }
                 for h in hits
+            ],
+            "verified_facts": [
+                {"domain": f["domain"], "metric": f["metric_key"], "value": f["value"]}
+                for f in facts[:10]
             ],
         }
     except Exception as exc:  # memory must never break the agent loop

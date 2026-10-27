@@ -125,11 +125,24 @@ class ExpertAgentBase(BaseAgent):
         errors: list[str] = []
         degraded: list[str] = []
 
-        # Run deterministic pipeline (offloaded to thread to avoid blocking the event loop)
+        # Run deterministic pipeline (offloaded to thread to avoid blocking
+        # the event loop). threadpool_limits(1) pins BLAS to a single thread:
+        # under concurrent expert execution, threaded reductions reorder
+        # float ops and jitter tree thresholds — the determinism invariant
+        # (byte-identical reports in zero-key mode) requires this.
         try:
             import asyncio
 
-            results = await asyncio.to_thread(self._execute_pipeline, params)
+            def _run() -> dict:
+                try:
+                    from threadpoolctl import threadpool_limits
+
+                    with threadpool_limits(limits=1):
+                        return self._execute_pipeline(params)
+                except ImportError:
+                    return self._execute_pipeline(params)
+
+            results = await asyncio.to_thread(_run)
         except Exception as exc:
             logger.warning("[%s] Pipeline failed: %s", self.name, exc)
             errors.append(f"Pipeline: {exc}")

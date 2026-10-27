@@ -82,6 +82,14 @@ class UserScorer:
 
         composite = self.intent_weight * intent_arr + self.ltv_weight * ltv_norm
 
+        # Converge float noise: under concurrent execution BLAS may reduce
+        # matrix ops in different orders, leaving ~1e-16 jitter that flips
+        # users across segmentation thresholds. Rounding to 6 decimals makes
+        # scoring deterministic without losing meaningful precision.
+        composite = np.round(composite, 6)
+        intent_arr = np.round(intent_arr, 6)
+        ltv_norm = np.round(ltv_norm, 6)
+
         result = pd.DataFrame(
             {
                 "intent_score": intent_arr,

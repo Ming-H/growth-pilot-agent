@@ -34,17 +34,6 @@ def detect_channel(base_url: str) -> Literal["local", "remote"]:
     return "local" if host.lower() in _LOCAL_HOSTS else "remote"
 
 
-def _memory_dir() -> str:
-    """Directory containing the memory store (parent of memory_db_path).
-
-    Bridge for the v8 MemoryManager(base_path=...) call sites until the v9
-    SQLite MemoryStore fully replaces it.
-    """
-    from pathlib import Path
-
-    return str(Path(get_settings().memory_db_path).parent)
-
-
 def _is_ollama_native(base_url: str) -> bool:
     """True when the local endpoint speaks Ollama's native protocol.
 

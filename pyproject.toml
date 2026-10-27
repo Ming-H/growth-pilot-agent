@@ -30,6 +30,8 @@ dependencies = [
     "pydantic>=2.0",
     # Prompt
     "jinja2>=3.1",
+    # Chinese tokenization (memory FTS + routing)
+    "jieba>=0.42",
     "pyyaml>=6.0",
     # CLI
     "click>=8.1",
@@ -54,11 +56,6 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.41b0",
     # Rate limiting
     "slowapi>=0.1.9",
-]
-
-[project.optional-dependencies]
-chinese = [
-    "jieba>=0.42",
 ]
 
 [project.scripts]

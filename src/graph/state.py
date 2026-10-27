@@ -60,6 +60,7 @@ class AnalysisState(TypedDict):
     data_path: NotRequired[str | None]
     org_id: str
     user_id: str
+    session_id: NotRequired[str | None]  # L0 chat session (memory layer)
 
     # ── Planning ─────────────────────────────────────────────────────────
     plan: NotRequired[dict[str, Any] | None]

@@ -260,6 +260,8 @@ def _last_ai_text(state: dict[str, Any]) -> str:
 
 async def agent_report_node(state: AgentState) -> dict:
     """Final report = agent's last answer (output-guarded) + memory write-back."""
+    import uuid
+
     from src.core.token_tracker import get_cost_tracker
     from src.guardrails.output_guard import validate_output
 
@@ -275,26 +277,50 @@ async def agent_report_node(state: AgentState) -> dict:
 
     cost_report = get_cost_tracker().report()
 
-    # Memory write-back: close the loop (search_memory read it, this stores it)
-    try:
-        from src.core.config import _memory_dir
-        from src.memory.manager import MemoryManager
+    # KPI snapshot from expert results (single aggregation point)
+    kpi_snapshot: dict[str, Any] = {}
+    for r in state.get("expert_results", []):
+        ek = r.get("kpis")
+        if isinstance(ek, dict):
+            kpi_snapshot.update(ek)
 
-        memory = MemoryManager(
-            base_path=_memory_dir(),
+    # Memory write-back: close the loop (search_memory read it, this stores it).
+    # Run-scoped analysis id — the v8 `agent:{user_id}` key collided across runs.
+    analysis_id = f"agent:{uuid.uuid4().hex[:12]}"
+    try:
+        from src.core.config import get_settings
+        from src.memory import MemoryStore
+
+        store = MemoryStore(db_path=get_settings().memory_db_path)
+        await store.save_analysis(
+            analysis_id=analysis_id,
             org_id=state.get("org_id", "default"),
-        )
-        memory.store(
-            run_id=f"agent:{state.get('user_id', 'anonymous')}",
             query=state.get("query", ""),
             scope=state.get("scope") or "full",
-            results_summary=final_report[:2000],
+            report=final_report,
+            kpis=kpi_snapshot,
+            session_id=state.get("session_id"),
         )
+        # L1 fact ledger for every validated expert result
+        for r in state.get("expert_results", []):
+            await store.record_facts(state.get("org_id", "default"), r, run_fingerprint=analysis_id)
+        # L0 session turn (when running inside a chat session)
+        if state.get("session_id"):
+            await store.save_turn(
+                state["session_id"],
+                org_id=state.get("org_id", "default"),
+                user_id=state.get("user_id", "anonymous"),
+                role="assistant",
+                content=final_report,
+                structured={"kpis": kpi_snapshot},
+            )
+        await store.close()
     except Exception as exc:
         logger.debug("[agent_report] Memory write-back unavailable: %s", exc)
 
     return {
         "final_report": final_report,
+        "kpi_snapshot": kpi_snapshot,
         "token_usage": {
             "input_tokens": cost_report["input_tokens"],
             "output_tokens": cost_report["output_tokens"],
