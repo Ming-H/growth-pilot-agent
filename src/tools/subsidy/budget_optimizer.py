@@ -198,8 +198,43 @@ class BudgetOptimizer:
                 budget_terms.append(n_users * a * x[s][a])
         prob += pulp.lpSum(budget_terms) <= total_budget, "TotalBudget"
 
-        # Solve
-        prob.solve(pulp.PULP_CBC_CMD(msg=0))
+        # Solve: HiGHS (in-process) first, CBC fallback. pulp's bundled CBC
+        # binary is x86_64-only and fails on ARM Macs with OSError 86 —
+        # the greedy fallback below is the last-resort safety net.
+        status = self._solve(prob)
+        if status == pulp.LpStatusOptimal:
+            return self._extract_solution(
+                prob, x, segments, user_segments, causal_effects, possible_amounts, total_budget
+            )
+        return self._optimize_greedy(
+            segments, user_segments, causal_effects, total_budget, possible_amounts
+        )
+
+    @staticmethod
+    def _solve(prob: pulp.LpProblem) -> int:
+        """Try solvers in order: HiGHS (highspy) → CBC. Returns final status."""
+        try:
+            prob.solve(pulp.HiGHS(msg=False))
+            if prob.status == pulp.LpStatusOptimal:
+                return prob.status
+        except Exception:  # noqa: BLE001 - solver unavailable, try next
+            pass
+        try:
+            prob.solve(pulp.PULP_CBC_CMD(msg=0))
+        except Exception:  # noqa: BLE001 - no solver at all
+            prob.status = pulp.LpStatusNotSolved
+        return prob.status
+
+    @staticmethod
+    def _extract_solution(
+        prob: pulp.LpProblem,
+        x: dict[str, dict[float, pulp.LpVariable]],
+        segments: list[str],
+        user_segments: dict[str, int],
+        causal_effects: dict[str, dict[str, float]],
+        possible_amounts: list[float],
+        total_budget: float,
+    ) -> dict[str, Any]:
 
         # Extract solution
         allocation: dict[str, Any] = {}
