@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-GrowthPilot Agent (`gpa`) — a **reconciliation-gated multi-agent user growth platform** (v9) built on LangGraph + FastAPI. Python 3.12+, managed with uv. Docs and prompts are largely Chinese; code/comments are English.
+GrowthPilot Agent (`gpa`) — a multi-agent user growth analytics platform (v9) built on LangGraph + FastAPI, with a deterministic KPI reconciliation gate that verifies every numeric claim in the final report traces back to tool output. Python 3.12+, managed with uv. Docs and prompts are largely Chinese; code/comments are English.
 
-**分工宪法**: deterministic tools compute facts (KPIs); the LLM only organises language; the KPI reconciliation gate (`src/core/kpi_gate.py`) owns "can this leave the building". Design doc: `docs/DESIGN-v9.md`.
+**Core principle**: deterministic tools compute facts (KPIs); the LLM only interprets and organises language; the KPI reconciliation gate (`src/core/kpi_gate.py`) owns the final verdict. Design doc: `docs/DESIGN-v9.md`.
 
 ## Commands
 
@@ -47,7 +47,7 @@ make docker-up
 
 ## Architecture
 
-### LLM dual-track channel (v9)
+### LLM dual channel (v9)
 
 `Settings.llm_base_url` is THE channel switch, auto-detected by host (`src/core/config.py: detect_channel`):
 - **local** (localhost/127.0.0.1/::1, zero key): Ollama native (`langchain-ollama`) when the URL is Ollama-shaped (:11434 or path contains `/api`), else OpenAI-compatible with `/v1` appended (vLLM/SGLang). `llm_compat_mode` forces the latter.

@@ -7,11 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [9.0.0] - 2026-10-28
 
-### 对账闸门式增长 Agent — 数字对得上账，才允许出门
+### KPI 校验闸门式增长 Agent
 
-v9 移植 tally（github.com/Ming-H/tally）的工程纪律：确定性工具计算事实，
-LLM 只组织语言，**对账闸门拥有"能不能出门"的最终决定权**。完整设计推理链见
-`docs/DESIGN-v9.md`。
+v9 的核心原则：确定性工具计算事实，LLM 只负责解读与组织语言，出口处的
+KPI 校验闸门对报告中的数字断言逐条追溯，无法回溯到工具产出的内容被拦截。
+完整设计文档见 `docs/DESIGN-v9.md`。
 
 ### Added
 
@@ -21,7 +21,7 @@ LLM 只组织语言，**对账闸门拥有"能不能出门"的最终决定权**�
   记忆回写移至闸门后。
 - **LLM 双轨通道**：`GPA_LLM_BASE_URL` 自动识别本地（Ollama 原生 via
   langchain-ollama / vLLM OpenAI 兼容）与远端（智谱/DeepSeek/任意兼容），
-  换脑不改代码；本地零 key。角色预设（温度+可选模型覆盖）替代 model_tiers。
+  仅通过 base_url 切换；本地通道无需 key。角色预设（温度+可选模型覆盖）替代 model_tiers。
   `create_llm` 返回 None 是降级哨兵。
 - **Agent 四支柱**：plan 节点（子目标清单+只删不造校验+☐/☑/☒ 状态）；
   启发式大脑（llm=None 时按 pending 子目标合成 tool_calls，同一张图）；

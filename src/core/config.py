@@ -1,6 +1,6 @@
 """Configuration management using Pydantic Settings.
 
-v9 LLM 配置（tally 式双轨通道，换脑不改代码）:
+v9 LLM 配置（双通道，由 base_url 主机地址自动判定）:
 
 - ``GPA_LLM_BASE_URL`` 是通道开关，按 host 自动识别:
   * localhost / 127.0.0.1 / ::1 → **本地通道**（零 key 零费用零外呼）
@@ -37,7 +37,7 @@ def detect_channel(base_url: str) -> Literal["local", "remote"]:
 def _is_ollama_native(base_url: str) -> bool:
     """True when the local endpoint speaks Ollama's native protocol.
 
-    Heuristic (tally-proven): default port 11434 or a path containing
+    Heuristic: default port 11434 or a path containing
     ``/api`` (Ollama native mounts under /api, not /v1).
     """
     try:

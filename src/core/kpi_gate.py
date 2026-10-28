@@ -1,7 +1,7 @@
-"""KPI 对账闸门 (reconciliation gate) — deterministic, zero LLM.
+"""KPI reconciliation gate — deterministic, zero LLM.
 
-Tally's core discipline adapted to growth analytics: **LLM 组织语言，
-确定性闸门拥有事实**。The final report may only carry numbers that trace
+Core principle of the platform: the LLM organises language, deterministic
+code owns the facts. The final report may only carry numbers that trace
 back to tool-computed KPIs (``kpi_snapshot`` ∪ L1 verified facts); claims
 that cannot be reconciled trip the gate.
 

@@ -295,7 +295,7 @@ def kpi() -> None:
 @main.command()
 @click.option("--scope", "-s", default="full", help="Default analysis scope.")
 def chat(scope: str, session_id: str = "", org_id: str = "default") -> None:
-    """Interactive chat with L0 session memory (tally-style).
+    """Interactive chat with L0 session memory.
 
     Recent turns are inherited verbatim; older turns arrive as structured
     extracts (query head + KPIs) — never free text as truth. The session

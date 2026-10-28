@@ -1,6 +1,6 @@
 """Three-layer SQLite memory (v9) — replaces the ChromaDB/TF-IDF hybrid.
 
-Layers (tally-inspired):
+Layers:
 
 - **L0 会话记忆** (``sessions`` / ``session_messages``): the chat REPL and
   multi-turn API calls inherit context — last *N* turns verbatim, earlier
@@ -17,8 +17,7 @@ Layers (tally-inspired):
 
 Episodic search (``analyses`` + ``analyses_fts``): FTS5 over jieba
 pre-tokenized text, fused with a LIKE substring fallback via RRF, with a
-recency boost — the same recipe tally proved sufficient at this scale,
-without a vector DB.
+recency boost — sufficient at this scale without a vector DB.
 
 Everything is async (aiosqlite) with a single serialized writer — no sync
 file I/O in the event loop, no asyncio.run gymnastics.

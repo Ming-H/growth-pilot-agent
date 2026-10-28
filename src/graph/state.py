@@ -86,7 +86,7 @@ class AnalysisState(TypedDict):
     expert_results: Annotated[list[dict[str, Any]], _replace_by_expert]
     execution_errors: Annotated[list[str], operator.add]
 
-    # ── Evaluation / 对账闸门 ─────────────────────────────────────────────
+    # ── Evaluation / KPI gate ────────────────────────────────────────────
     quality_scores: NotRequired[dict[str, Any] | None]
     needs_refinement: NotRequired[bool]
     refinement_round: NotRequired[int]
@@ -102,7 +102,7 @@ class AnalysisState(TypedDict):
     status: AnalysisStatus
     token_usage: NotRequired[dict[str, Any]]
     cost_usd: NotRequired[float]
-    # Visible degradation markers (tally discipline): plan:rule, eval:rule,
+    # Visible degradation markers: plan:rule, eval:rule,
     # report:template, kpi_gate:degraded, kpi_gate:annotated, agent_loop:capped
     degradations: Annotated[list[str], operator.add]
     # Per-node trace entries {"node", "dur_ms", "detail"} (diagnostic tier)

@@ -1,6 +1,6 @@
-"""LLM factory — dual-track channel, resolved from a single base_url.
+"""LLM factory — dual channel, resolved from a single base_url.
 
-Channel layout (v9, tally-style 换脑不改代码):
+Channel layout (v9):
 
 - **本地通道**（base_url host = localhost/127.0.0.1/::1，零 key）:
   - Ollama-shaped endpoints (:11434 or a path containing /api) use

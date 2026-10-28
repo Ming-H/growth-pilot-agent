@@ -1,4 +1,4 @@
-"""对账闸门 graph node — the final node of both orchestration modes.
+"""KPI reconciliation gate node — the final node of both orchestration modes.
 
 Runs after the report is produced: LLM-organised language is checked
 against tool-computed facts. Violations degrade to the deterministic
