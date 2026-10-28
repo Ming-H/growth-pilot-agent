@@ -569,15 +569,28 @@ async def evaluate_gate_node(state: AgentState) -> dict:
 
 
 def _route_after_gate(state: AgentState) -> str:
-    """Router after the quality gate: refine (back to agent) or finish.
+    """Router after the quality gate: refine / approval / report.
 
-    A7 fix: `<` not `<=` — the round was already incremented by the gate,
-    so comparing with `<=` allowed one extra regeneration beyond the bound
-    (workflow mode always used `<`).
+    - A7 fix: `<` not `<=` — the round was already incremented by the gate,
+      so comparing with `<=` allowed one extra regeneration beyond the bound.
+    - Approval is ROUTED TO only when it will actually pause (required ∧
+      budget ≥ threshold); otherwise skip straight to report. The graph
+      compiles with ``interrupt_before=["approval"]`` — routing into the
+      node unconditionally paused EVERY run before its report (v8 bug that
+      made agent mode silently produce no report whenever a checkpointer
+      was attached).
     """
     if state.get("needs_refinement") and (state.get("refinement_round", 0) or 0) < _max_rounds():
         return "agent"
-    return "approval"
+    from src.core.config import get_settings
+
+    settings = get_settings()
+    if (
+        state.get("approval_required", False)
+        and (state.get("budget") or 0) >= settings.budget_approval_threshold
+    ):
+        return "approval"
+    return "report"
 
 
 def _max_rounds() -> int:
@@ -657,12 +670,15 @@ async def agent_report_node(state: AgentState) -> dict:
 
     cost_report = get_cost_tracker().report()
 
-    # KPI snapshot from expert results (single aggregation point)
+    # KPI snapshot from expert results (single aggregation point);
+    # budget joins the ground truth so template 预算 rows reconcile.
     kpi_snapshot: dict[str, Any] = {}
     for r in state.get("expert_results", []):
         ek = r.get("kpis")
         if isinstance(ek, dict):
             kpi_snapshot.update(ek)
+    if state.get("budget"):
+        kpi_snapshot.setdefault("budget", float(state["budget"]))
 
     update = {
         "final_report": final_report,

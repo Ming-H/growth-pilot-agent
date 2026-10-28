@@ -69,6 +69,11 @@ def _build_compat_result(
             "cost_usd": result_state.get("cost_usd", 0),
         },
         "kpi_snapshot": kpi_snapshot,
+        # v9 observability pass-through (CLI -v / --json)
+        "degradations": result_state.get("degradations", []),
+        "trace": result_state.get("trace", []),
+        "agent_steps": result_state.get("agent_steps", []),
+        "kpi_gate_result": result_state.get("kpi_gate_result"),
     }
 
 

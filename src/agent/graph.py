@@ -92,7 +92,7 @@ def build_agent_graph() -> StateGraph:
     graph.add_conditional_edges(
         "evaluate",
         _route_after_gate,
-        {"agent": "agent", "approval": "approval"},
+        {"agent": "agent", "approval": "approval", "report": "report"},
     )
     graph.add_conditional_edges(
         "approval",

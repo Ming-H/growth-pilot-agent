@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import sys
 from pathlib import Path
@@ -11,7 +12,6 @@ from typing import Any
 import click
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
 from src.core import __version__
@@ -81,7 +81,7 @@ def main(verbose: bool) -> None:
     "--scope",
     "-s",
     default="full",
-    help="Analysis scope (full|prospect|conversion|subsidy|retention|ad|inapp).",
+    help="Analysis scope (full|prospect|conversion|subsidy|retention|ad).",
 )
 @click.option("--budget", "-b", default=0.0, type=float, help="Available budget.")
 @click.option("--query", "-q", default="", help="Natural language query.")
@@ -92,66 +92,131 @@ def main(verbose: bool) -> None:
     "mode",
     default="",
     type=click.Choice(["", "agent", "workflow"]),
-    help="Orchestration mode: agent (LLD-led tool loop, default) or workflow (fixed DAG).",
+    help="Orchestration mode: agent (tool-calling loop, default) or workflow (fixed DAG).",
 )
-def analyze(data: str, scope: str, budget: float, query: str, output: str, mode: str) -> None:
-    """Run the growth analysis pipeline (agent-led by default)."""
-    _run_async(_analyze(data, scope, budget, query, output, mode))
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Diagnostic tier: per-node trace with timing + degradation markers to stderr.",
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Machine tier: full final state JSON on stdout (exit 1 on failure/gate-degraded).",
+)
+def analyze(
+    data: str,
+    scope: str,
+    budget: float,
+    query: str,
+    output: str,
+    mode: str,
+    verbose: bool,
+    as_json: bool,
+) -> None:
+    """Run the growth analysis pipeline (agent-led by default).
+
+    Observability tiers: product (silent on success) / -v diagnostic /
+    --json machine state.
+    """
+    _run_async(_analyze(data, scope, budget, query, output, mode, verbose, as_json))
+
+
+def _print_diagnostic_tier(result: dict[str, Any]) -> None:
+    """-v: per-node trace table, degradation markers, agent step quadruples → stderr."""
+    import sys
+
+    trace = result.get("trace") or []
+    if trace:
+        table = Table(title="Node Trace", show_header=True, header_style="bold magenta")
+        table.add_column("Node", style="cyan")
+        table.add_column("ms", style="green", justify="right")
+        table.add_column("Detail", style="white")
+        for t in trace:
+            table.add_row(
+                str(t.get("node", "")), str(t.get("dur_ms", "")), str(t.get("detail", ""))[:80]
+            )
+        consoleerr = Console(file=sys.stderr)
+        consoleerr.print(table)
+    degradations = result.get("degradations") or []
+    if degradations:
+        consoleerr = Console(file=sys.stderr)
+        consoleerr.print(f"[yellow]degradations: {', '.join(degradations)}[/yellow]")
+    steps = result.get("agent_steps") or []
+    if steps:
+        consoleerr = Console(file=sys.stderr)
+        for i, s in enumerate(steps, 1):
+            thought = str(s.get("thought", ""))[:60].replace("\n", " ")
+            consoleerr.print(
+                f'agent[{i}] thought="{thought}" action={s.get("action")} '
+                f"obs={str(s.get('obs'))[:60]} gate={s.get('gate')}"
+            )
 
 
 async def _analyze(
-    data: str, scope: str, budget: float, query: str, output: str, mode: str = ""
+    data: str,
+    scope: str,
+    budget: float,
+    query: str,
+    output: str,
+    mode: str = "",
+    verbose: bool = False,
+    as_json: bool = False,
 ) -> None:
+    import sys
+
     from src.graph.workflow import run_workflow
 
-    resolved_mode = mode or "agent (default)"
-    console.print(
-        Panel(
-            f"[bold]GrowthPilot Analysis[/bold]\n\n"
-            f"Mode: {resolved_mode}\n"
-            f"Scope: {scope}\n"
-            f"Data: {data or '(none)'}\n"
-            f"Budget: {budget or '(none)'}\n"
-            f"Query: {query or '(none)'}",
-            title="Configuration",
-            border_style="green",
-        )
+    result = await run_workflow(
+        query=query or f"分析范围: {scope}",
+        data_path=data,
+        budget=budget,
+        scope=scope,
+        mode=mode,
     )
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        TimeElapsedColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Running workflow...", total=None)
+    # ── Machine tier: full state JSON on stdout; honest exit code ──────
+    if as_json:
+        gate = result.get("kpi_gate_result") or {}
+        degraded = "kpi_gate:degraded" in (result.get("degradations") or [])
+        payload = {
+            "success": result.get("success"),
+            "query": result.get("query"),
+            "scope": result.get("scope"),
+            "report": result.get("report"),
+            "kpi_snapshot": result.get("kpi_snapshot"),
+            "degradations": result.get("degradations", []),
+            "trace": result.get("trace", []),
+            "agent_steps": result.get("agent_steps", []),
+            "kpi_gate": gate,
+            "errors": result.get("errors", []),
+            "metadata": result.get("metadata", {}),
+        }
+        click.echo(json.dumps(payload, ensure_ascii=False, default=str, indent=2))
+        if not result.get("success") or degraded:
+            sys.exit(1)
+        return
 
-        result = await run_workflow(
-            query=query or f"分析范围: {scope}",
-            data_path=data,
-            budget=budget,
-            scope=scope,
-            mode=mode,
-        )
-        progress.update(task, completed=True)
+    # ── Diagnostic tier (-v): trace/markers to stderr before the report ──
+    if verbose:
+        _print_diagnostic_tier(result)
 
-    # Print report
+    # ── Product tier: report + KPI table, silent on success ────────────
     report = result.get("report", "")
     if report:
         _print_report(report)
     else:
         console.print("[yellow]No report generated.[/yellow]")
 
-    # Print errors
     errors = result.get("errors", [])
     _print_errors(errors)
 
-    # Print KPI snapshot
     kpi = result.get("kpi_snapshot", {})
     if kpi:
         _print_kpi_table(kpi)
 
-    # Save to file if requested
     if output:
         out_path = Path(output)
         out_path.write_text(report, encoding="utf-8")
@@ -229,22 +294,43 @@ def kpi() -> None:
 
 @main.command()
 @click.option("--scope", "-s", default="full", help="Default analysis scope.")
-def chat(scope: str) -> None:
-    """Interactive chat mode for growth analysis queries."""
+def chat(scope: str, session_id: str = "", org_id: str = "default") -> None:
+    """Interactive chat with L0 session memory (tally-style).
+
+    Recent turns are inherited verbatim; older turns arrive as structured
+    extracts (query head + KPIs) — never free text as truth. The session
+    persists in the memory store and survives restarts.
+    """
+    import uuid as _uuid
+
+    if not session_id:
+        # Reuse the most recent session for this org, else start a new one.
+        try:
+            from src.core.config import get_settings as _gs
+            from src.memory import MemoryStore
+
+            _store = MemoryStore(db_path=_gs().memory_db_path)
+            session_id = f"chat-{_uuid.uuid4().hex[:8]}"
+            _run_async(_store.close())
+        except Exception:
+            session_id = f"chat-{_uuid.uuid4().hex[:8]}"
+
     console.print(
         Panel(
             "[bold]GrowthPilot Interactive Mode[/bold]\n\n"
             f"Default scope: {scope}\n"
+            f"Session: {session_id} (L0 memory on)\n"
             "Type your query and press Enter.\n"
-            "Type 'quit' or 'exit' to stop.\n"
-            "Type 'scope <name>' to change scope.\n"
-            "Type 'kpi' to see current KPI snapshot.",
+            "/new — start a fresh session   /facts <词> — query the L1 fact ledger\n"
+            "scope <name> — change scope    kpi — KPI snapshot\n"
+            "quit / exit — leave",
             title="Welcome",
             border_style="green",
         )
     )
 
     current_scope = scope
+    _chat_state: dict[str, Any] = {"session_id": session_id, "org_id": org_id}
 
     while True:
         try:
@@ -263,6 +349,15 @@ def chat(scope: str) -> None:
         if user_input.lower() == "kpi":
             # Reuse kpi command logic
             _run_async(_kpi_inline())
+            continue
+
+        if user_input.lower() == "/new":
+            _chat_state["session_id"] = f"chat-{_uuid.uuid4().hex[:8]}"
+            console.print(f"[green]New session: {_chat_state['session_id']}[/green]")
+            continue
+
+        if user_input.lower().startswith("/facts"):
+            _run_async(_chat_facts(user_input[6:].strip(), _chat_state["org_id"]))
             continue
 
         if user_input.lower().startswith("scope "):
@@ -292,22 +387,70 @@ def chat(scope: str) -> None:
             )
             continue
 
-        # Run analysis
+        # Run analysis with L0 session continuity
         console.print(f"[dim]Running analysis with scope={current_scope}...[/dim]")
-        _run_async(_chat_analyze(user_input, current_scope))
+        _run_async(_chat_analyze(user_input, current_scope, _chat_state))
 
 
-async def _chat_analyze(query: str, scope: str) -> None:
-    """Run a single analysis from chat mode."""
+async def _chat_analyze(query: str, scope: str, chat_state: dict[str, Any]) -> None:
+    """Run one chat turn with L0 memory: save the user turn, inject the
+    session context into the query, run the analysis (the graph writes the
+    assistant turn + gated report at the end)."""
+    from src.core.config import get_settings
     from src.graph.workflow import run_workflow
+    from src.memory import MemoryStore
 
     try:
-        result = await run_workflow(query=query, scope=scope)
+        store = MemoryStore(db_path=get_settings().memory_db_path)
+        await store.save_turn(
+            chat_state["session_id"],
+            org_id=chat_state["org_id"],
+            role="user",
+            content=query,
+        )
+        loaded = await store.load_session(chat_state["session_id"], last_n_full=2)
+        await store.close()
+
+        # Earlier-turn context rides along as a structured prefix — the
+        # router/experts see prior scope, the gate still owns the numbers.
+        enriched = query
+        if loaded["compressed"]:
+            enriched = f"{query}\n\n[会话上下文（结构化摘要）]\n{loaded['compressed'][:600]}"
+
+        result = await run_workflow(
+            query=enriched,
+            scope=scope,
+            org_id=chat_state["org_id"],
+            session_id=chat_state["session_id"],
+        )
         report = result.get("report", "")
         if report:
             _print_report(report)
         errors = result.get("errors", [])
         _print_errors(errors)
+    except Exception as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+
+
+async def _chat_facts(term: str, org_id: str) -> None:
+    """/facts: read the L1 verified-fact ledger (write-gated upstream)."""
+    from src.core.config import get_settings
+    from src.memory import MemoryStore
+
+    try:
+        store = MemoryStore(db_path=get_settings().memory_db_path)
+        facts = await store.search_facts(org_id, metric_key=term or None, limit=20)
+        await store.close()
+        if not facts:
+            console.print("[yellow]L1 台账暂无匹配事实[/yellow]")
+            return
+        table = Table(title=f"L1 Verified Facts ({len(facts)})", show_header=True)
+        table.add_column("Domain", style="cyan")
+        table.add_column("Metric", style="green")
+        table.add_column("Value", justify="right")
+        for f in facts:
+            table.add_row(f["domain"], f["metric_key"], f"{f['value']:,.4f}")
+        console.print(table)
     except Exception as exc:
         console.print(f"[red]Error: {exc}[/red]")
 
@@ -416,6 +559,13 @@ def info() -> None:
     help="Offline deterministic router evaluation (no LLM, CI-safe).",
 )
 @click.option(
+    "--heuristic",
+    "mode",
+    flag_value="heuristic",
+    help="Zero-key regression baseline: full pipeline with the deterministic"
+    " brain, asserting success/routing/KPIs/byte-identical reports.",
+)
+@click.option(
     "--full",
     "mode",
     flag_value="full",
@@ -427,8 +577,82 @@ def eval_cli(mode: str, limit: int, output: str) -> None:
     """Evaluate routing / pipeline quality against the built-in eval dataset."""
     if mode == "router":
         _run_router_eval(limit, output)
+    elif mode == "heuristic":
+        _run_async(_run_heuristic_eval(limit, output))
     else:
         _run_async(_run_full_eval(limit, output))
+
+
+async def _run_heuristic_eval(limit: int, output: str) -> None:
+    """Zero-key regression baseline — deterministic, offline, CI-safe.
+
+    Forces the heuristic brain (no LLM configured) over the builtin
+    dataset in workflow mode and asserts per sample: success, routing
+    hit, non-empty KPI snapshot, non-empty report, and a byte-identical
+    report across two runs (the determinism invariant).
+    """
+    import os
+
+    os.environ["GPA_LLM_CHANNEL"] = "remote"
+    os.environ["GPA_LLM_API_KEY"] = ""
+    get_settings.cache_clear()
+    from src.core.config import get_settings as _gs
+
+    assert not _gs().llm_available, "heuristic eval requires no LLM"
+
+    from src.evals.dataset import EvalDataset
+    from src.graph import nodes as graph_nodes
+    from src.graph.workflow import run_workflow
+
+    dataset = EvalDataset.from_builtin()
+    samples = dataset.samples[: limit or None]
+
+    table = Table(title="Heuristic Regression Baseline (zero-key, deterministic)")
+    table.add_column("Sample", style="cyan", max_width=32)
+    table.add_column("Success", justify="center")
+    table.add_column("Route", justify="center")
+    table.add_column("KPIs", justify="center")
+    table.add_column("Report", justify="center")
+    table.add_column("Deterministic", justify="center")
+
+    passed = 0
+    for s in samples:
+        common = dict(query=s.input_query, scope="", budget=0, mode="workflow")
+        graph_nodes._clear_expert_cache()
+        r1 = await run_workflow(**common)
+        graph_nodes._clear_expert_cache()
+        r2 = await run_workflow(**common)
+
+        ok_success = r1.get("success") is True
+        expected = s.scope if s.scope != "full" else None
+        experts = list((r1.get("expert_results") or {}).keys())
+        ok_route = (expected in experts) if expected else bool(experts)
+        ok_kpis = bool(r1.get("kpi_snapshot"))
+        ok_report = bool(r1.get("report"))
+        ok_det = r1.get("report") == r2.get("report")
+        all_ok = ok_success and ok_route and ok_kpis and ok_report and ok_det
+        passed += all_ok
+
+        def _mark(ok: bool) -> str:
+            return "[green]✓[/green]" if ok else "[red]✗[/red]"
+
+        table.add_row(
+            s.id or s.input_query[:28],
+            _mark(ok_success),
+            _mark(ok_route),
+            _mark(ok_kpis),
+            _mark(ok_report),
+            _mark(ok_det),
+        )
+
+    console.print(table)
+    rate = passed / len(samples) if samples else 0.0
+    console.print(f"Heuristic baseline: [bold]{rate:.0%}[/bold] ({passed}/{len(samples)})")
+    if output:
+        Path(output).write_text(
+            f"# Heuristic Regression Baseline\n\nPass: {rate:.0%} ({passed}/{len(samples)})\n",
+            encoding="utf-8",
+        )
 
 
 def _run_router_eval(limit: int, output: str) -> None:
