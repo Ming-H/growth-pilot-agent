@@ -30,12 +30,11 @@ def get_engine():
     global _engine
     if _engine is None:
         s = get_settings()
-        _engine = create_async_engine(
-            s.db_url,
-            echo=s.db_echo,
-            pool_size=s.db_pool_size,
-            pool_pre_ping=True,
-        )
+        engine_kwargs: dict = {"echo": s.db_echo, "pool_pre_ping": True}
+        # SQLite (async) rejects pool_size — only pool-based dialects take it.
+        if s.db_url.startswith("postgresql"):
+            engine_kwargs["pool_size"] = s.db_pool_size
+        _engine = create_async_engine(s.db_url, **engine_kwargs)
     return _engine
 
 

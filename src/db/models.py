@@ -90,6 +90,9 @@ class Analysis(Base):
     scope: Mapped[str] = mapped_column(String(20), default="full")
     budget: Mapped[float] = mapped_column(Float, default=0.0)
     status: Mapped[str] = mapped_column(String(20), default="pending")
+    # Orchestration mode that produced this analysis (agent | workflow) —
+    # HITL resume must fetch the SAME graph topology (A3).
+    mode: Mapped[str] = mapped_column(String(16), default="agent")
     result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     kpi_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     strategy_recommendation: Mapped[str | None] = mapped_column(Text, nullable=True)

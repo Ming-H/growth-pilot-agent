@@ -218,6 +218,7 @@ async def run_analysis(
     data_path: str | None = None,
     approval_required: bool = False,
     thread_id: str | None = None,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     """Run a complete analysis through the StateGraph DAG.
 
@@ -263,6 +264,7 @@ async def run_analysis(
             "query": query,
             "org_id": org_id,
             "user_id": user_id,
+            "session_id": session_id,
             "scope": scope,
             "budget": budget,
             "data_path": data_path,

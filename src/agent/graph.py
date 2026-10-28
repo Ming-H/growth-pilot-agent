@@ -125,6 +125,7 @@ async def run_agent_analysis(
     data_path: str | None = None,
     approval_required: bool = False,
     thread_id: str | None = None,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     """Run a complete agent-led analysis; returns the final AgentState dict."""
     # Run-scoped cost attribution (concurrent runs no longer share a
@@ -145,6 +146,7 @@ async def run_agent_analysis(
         "query": query,
         "org_id": org_id,
         "user_id": user_id,
+        "session_id": session_id,
         "scope": scope,
         "budget": budget,
         "data_path": data_path,

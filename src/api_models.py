@@ -22,10 +22,21 @@ class AnalyzeRequest(BaseModel):
     query: str = Field(default="", description="User query for growth analysis")
     scope: str = Field(
         default="full",
-        description="Analysis scope: full|prospect|conversion|subsidy|retention|ad|inapp",
+        description="Analysis scope: full|prospect|conversion|subsidy|retention|ad",
     )
-    data_path: str = Field(default="data/", description="Path to data directory")
+    data_path: str = Field(default="", description="Path to data directory")
     budget: float = Field(default=0.0, ge=0.0, description="Available budget")
+    mode: str = Field(
+        default="",
+        description="Orchestration mode: agent | workflow (empty = settings default)",
+    )
+    approval_required: bool = Field(
+        default=False,
+        description="Require human approval before the report is emitted",
+    )
+    session_id: str | None = Field(
+        default=None, description="L0 chat session id for memory continuity"
+    )
 
 
 class ApprovalRequest(BaseModel):
@@ -138,7 +149,9 @@ class AnalysisStateResponse(BaseModel):
     quality_scores: dict[str, Any] | None = None
     approved: bool | None = None
     approval_required: bool | None = None
+    subgoals: list[dict[str, Any]] | None = None
     final_report: str | None = None
+    degradations: list[str] | None = None
     next_nodes: list[str] | None = None
     raw_state: dict[str, Any] | None = None
 
