@@ -16,9 +16,11 @@ chat:
 	uv run python -m src.cli chat
 
 test:
+	GPA_DEMO_MODE=true GPA_LLM_API_KEY=sk-test-placeholder GPA_DB_URL=sqlite+aiosqlite:///./test.db \
 	uv run python -m pytest tests/ -v --tb=short
 
 test-fast:
+	GPA_DEMO_MODE=true GPA_LLM_API_KEY=sk-test-placeholder GPA_DB_URL=sqlite+aiosqlite:///./test.db \
 	uv run python -m pytest tests/ -x -q
 
 lint:

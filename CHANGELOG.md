@@ -5,6 +5,62 @@ All notable changes to the GrowthPilot Agent project will be documented in this 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0] - 2026-10-28
+
+### 对账闸门式增长 Agent — 数字对得上账，才允许出门
+
+v9 移植 tally（github.com/Ming-H/tally）的工程纪律：确定性工具计算事实，
+LLM 只组织语言，**对账闸门拥有"能不能出门"的最终决定权**。完整设计推理链见
+`docs/DESIGN-v9.md`。
+
+### Added
+
+- **对账闸门**（`src/core/kpi_gate.py`）：报告中 KPI 语境数字断言逐条与
+  `kpi_snapshot` ∪ L1 台账对账（显示精度容差）；`on` 模式违规即降级确定性
+  模板+对账附录，`annotate` 附差异表，`off` 跳过。两种模式共用，最终节点，
+  记忆回写移至闸门后。
+- **LLM 双轨通道**：`GPA_LLM_BASE_URL` 自动识别本地（Ollama 原生 via
+  langchain-ollama / vLLM OpenAI 兼容）与远端（智谱/DeepSeek/任意兼容），
+  换脑不改代码；本地零 key。角色预设（温度+可选模型覆盖）替代 model_tiers。
+  `create_llm` 返回 None 是降级哨兵。
+- **Agent 四支柱**：plan 节点（子目标清单+只删不造校验+☐/☑/☒ 状态）；
+  启发式大脑（llm=None 时按 pending 子目标合成 tool_calls，同一张图）；
+  步数硬上限与弱工具调用翻转（`chief_tools:weak`）；步级四元组观测。
+- **三层记忆**（`src/memory/store.py`，SQLite+FTS5）：L0 会话（近轮全量+
+  更早结构化压缩）、L1 事实台账（写闸 success∧validated∧kpis，读不豁免）、
+  L2 别名（组织词汇驱动路由）。遗留 JSON 自动迁移。新增
+  GET/PUT /api/v1/memory/aliases 与 GET /api/v1/memory/facts。
+- **观测三档**：`gpa analyze -v`（节点级 trace+耗时+降级标记，stderr）、
+  `--json`（整态+诚实退出码）、产品态成功静默。
+- **评测三模式**：`--router`（14/14 确定性）、`--heuristic`（零 key 回归
+  基线，含字节一致断言）、`--full`（LLM 评审）。
+- **chat L0 会话**：持久会话、/new、/facts；图内 assistant 轮写入过闸报告。
+- **ACI 工具规格**：用途/何时调用/参数/失败模式进 chief 提示词。
+- 首个 Alembic 迁移（0001: analyses.mode）。
+
+### Fixed
+
+- **A1-A9 全量**（v8 agent 重构后 Web 层断裂）：多租户透传、SSE 模式分发、
+  HITL 线程纪律（agent 模式生产环境从未产出过报告——闸门路由无条件进被
+  interrupt 的 approval 节点）、响应/落库读错 key、图编译缓存、精化 off-by-one、
+  OSError 级 import 保护、按运行成本归因（ContextVar cost_scope）。
+- **确定性根因三连**：LightGBM 多线程训练不确定、合成数据墙钟时间锚导致
+  recency 特征漂移、共享 checkpoint 线程跨运行泄漏状态——字节一致不变式
+  全部抓住并修复。
+- `get_engine` 对 SQLite 传 pool_size（文档里的 sqlite 配置从未生效）。
+- 求解器链 HiGHS→CBC→贪心（pulp 3.x 自带 CBC 二进制 ARM Mac 不可用）；
+  scipy>=1.16（1.15.3 `_propack` dylib 被新版 macOS dyld 拒绝）。
+- web.py（1038 行）拆为 `src/web/` 包（app/deps/routers）。
+
+### Removed
+
+- 死依赖：shap、dowhy（README 曾宣称、代码从未 import）、matplotlib、
+  seaborn、chromadb；死代码：ToolRegistry（无人按名解析）、ContextManager
+  （refinement_feedback 死链）、Visualizer、KpiSnapshot、重复 CostTracker、
+  CLI 桩命令（experiment/attribution/seasonal）。
+- 配置：GPA_LLM_PROVIDER / GPA_MODEL_TIERS / GPA_FALLBACK_PROVIDER /
+  GPA_EXPERT_MODEL_TIER / GPA_MEMORY_BASE_PATH（迁移表见 README）。
+
 ---
 
 ## [8.0.0] - 2026-10-16

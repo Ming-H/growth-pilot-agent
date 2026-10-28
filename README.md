@@ -2,221 +2,204 @@
 
 # GrowthPilot Agent
 
-**Production-Grade Multi-Agent User Growth Platform**
-
-覆盖用户全生命周期 — 潜客识别 → 端内转化 → 补贴优化 → 留存召回 → 域外投放 — 以实验驱动增长决策
-
-[![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
-[![LangGraph](https://img.shields.io/badge/LangGraph-%E2%89%A50.2-green?logo=langchain&logoColor=white)](https://github.com/langchain-ai/langgraph)
-[![FastAPI](https://img.shields.io/badge/FastAPI-%E2%89%A50.110-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Tests](https://img.shields.io/badge/tests-469%20passed-brightgreen)](./tests)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+**数字对得上账，才允许出门 —— 对账闸门式的用户增长 Agent**
 
 </div>
 
----
+> **增长的每个数字都要能对账。**
 
-## Architecture Overview（v8：Agent 主导）
+**封闭世界约束下的增长分析 Agent**（v9）：确定性工具计算事实（KPI），LLM 只负责组织语言——**对账闸门拥有"能不能出门"的最终决定权**。报告中的 KPI 数字断言必须能回溯到专家工具的产出（`kpi_snapshot` ∪ L1 事实台账）；对不上的报告自动降级为确定性模板报告并附对账附录。**编造的数字出不了门。**
 
-```
-                      ┌──────────────────────────────────────────────┐
-                      │        Chief Agent（LLM 工具调用循环）         │
-                      │                                              │
-                      │   GLM-4.7 + bind_tools —— LLM 动态决定：      │
-                      │   · 调用哪些专家工具、什么顺序                 │
-                      │   · 观察结果后是否需要补充分析                  │
-                      │   · 结果是否足以回答、何时输出报告              │
-                      └──────────────────────┬───────────────────────┘
-                          tool_calls         │        最终回答
-                     ┌──────────────────────▼──────────┐
-                     │           TOOLS（工具层）         │
-                     │  run_prospect_analysis  ┐        │
-                     │  run_conversion_analysis │ 每个专家仍走 │
-                     │  run_subsidy_analysis    │ BaseAgent.run() │
-                     │  run_retention_analysis  │ 完整生命周期 │
-                     │  run_ad_analysis         │ (hooks+中间件) │
-                     │  search_memory（跨会话记忆检索）┘        │
-                     │  · 确定性 ML 管线 → Pydantic 校验          │
-                     │  · LLM 收到精简 digest，完整结果入 state    │
-                     └──────────────────────┬──────────┘
-                                            ▼
-                      ┌──────────────────────────────────────────────┐
-                      │  质量门（LLM-as-judge）                        │
-                      │  低分 → 反馈注入回 Agent（有界轮次 ≤2）         │
-                      └──────────────────────┬───────────────────────┘
-                                           ▼
-                      ┌──────────────────────────────────────────────┐
-                      │  人工审批（budget ≥ 阈值时 interrupt 中断，     │
-                      │  checkpoint 持久化，thread_id 断点恢复）        │
-                      └──────────────────────┬───────────────────────┘
-                                           ▼
-                      ┌──────────────────────────────────────────────┐
-                      │  报告 = Agent 最终消息（输出护栏）+ 记忆回写      │
-                      └──────────────────────────────────────────────┘
+> **零 key 是默认，不是上限。** LLM 双轨通道：openEuler 本地小模型（Ollama 原生 / vLLM OpenAI 兼容端点，零 key 零费用零外呼）或远端 API key（智谱 GLM / DeepSeek / 任意 OpenAI 兼容端点，`.env` 改一行切换）。没有 LLM 时启发式大脑接管，走同一张图，逐点降级且全程可见。**可靠性由架构保证，不靠模型堆料。**
 
-  备选模式 --mode workflow：固定 plan→execute→evaluate DAG（确定性路由，
-  不依赖 LLM 决策，作为 LLM 不可用时的降级方案保留）
+## 核心特性
 
----
+| 特性 | 一句话 | 锚点 |
+|---|---|---|
+| **对账闸门** | 报告中 KPI 语境的数字断言逐条与工具产出对账（`8%`≡`0.08`±显示精度）；违规即降级确定性模板+对账附录 | `src/core/kpi_gate.py`，测试 `test_kpi_gate.py` |
+| **封闭世界契约** | 事实只来自内部确定性工具（LightGBM/HiGHS/statsmodels）；LLM 参数知识只组织语言不产出事实 | 分工宪法，DESIGN-v9 §1 |
+| **Agent 四支柱** | Planning（子目标清单+只删不造校验）/ Memory（L0 会话+L1 事实台账+L2 别名）/ Tool Use（ACI 自描述+失败模式）/ ReAct（步级四元组观测） | DESIGN-v9 §3 |
+| **双大脑** | 启发式规则模式（零 key、可复现回归基线）与 LLM 模式**同一张图**；降级点全带标记（`plan:rule`/`eval:rule`/`report:template`…） | `gpa eval --heuristic` |
+| **确定性优先** | LightGBM 单线程确定性训练、合成数据固定时间锚点、BLAS 线程收敛——同输入零 key 模式产出**字节一致**的报告 | `test_zero_key.py::test_report_byte_identical` |
+| **LLM 双轨通道** | base_url 一行切脑：localhost 自动识别本地（Ollama 原生/vLLM），远端智谱/DeepSeek 走 API key | DESIGN-v9 §2 |
+| **HITL 审批** | 高预算分析 interrupt 暂停，checkpoint 持久化，thread 纪律统一（org:analysis_id） | `/analyses/{id}/approve` |
+| **评测内建** | 路由命中 / 启发式回归基线 / 全链路 LLM 评审三档，一条命令复现 | `gpa eval --router \| --heuristic \| --full` |
+| **观测三档** | 产品态（成功静默）/ `-v` 诊断态（节点级 trace+耗时）/ `--json` 机器态（整态+诚实退出码） | `gpa analyze -v / --json` |
+| **多租户 SaaS** | JWT 认证、org 级隔离（记忆/台账/线程全按 org 作用域）、分析持久化、SSE 流式 | `src/web/` |
 
-## Highlights（每一条都对应真实实现）
-
-- **经典 Agent 主导编排** — Chief Agent 原生 tool-calling 循环（GLM-4.7 `bind_tools`）：LLM 动态决定调用哪些专家工具、什么顺序、结果是否充分、何时产出报告；备选 `--mode workflow` 固定 DAG 作为 LLM 不可用时的确定性降级
-- **工具先行、AI 解读** — 每个 Expert 先跑确定性工具（LightGBM / DoWhy / PuLP / BG-NBD）产出结构化结果，LLM 只做业务解读与综合，数据层可审计
-- **Evaluator-Optimizer 质量循环** — LLM-as-judge 三维打分，低于阈值自动携带反馈重跑（≤2 轮）；执行失败的专家直接记 0 分跳过，不浪费重试
-- **Human-in-the-Loop** — `interrupt_before=["approval"]` + PostgreSQL checkpointer，高预算分析暂停等待人工审批，`thread_id` 断点恢复
-- **韧性三件套，全部生效** — 指数退避重试（读自配置）→ 熔断器按 **(provider, model, endpoint) 进程级共享** → 跨厂商 fallback；自我 fallback（同端点）会被自动检测并禁用
-- **Hook + Middleware 生命周期** — `execute_node` 经由 `BaseAgent.run()` 调用每个专家：Tracing/Logging/Metrics hook 与 Retry/Logging/ErrorHandling 中间件栈在真实链路中执行
-- **三层模型分级** — `fast`（评估）/ `default`（规划、专家）/ `power`（最终综合报告）路由到不同模型与温度；tier 配置完全由环境变量驱动
-- **记忆闭环** — Agent 通过 `search_memory` 工具按 org 检索历史分析（ChromaDB 向量 / TF-IDF 回退），运行结束自动回写新分析；跨会话上下文在 Agent 的自主决策中使用
-- **成本按运行归因** — LangChain callback 逐 agent 记录 token/成本，每次分析开始时重置，报告输出真实 input/output 拆分
-- **输入/输出护栏** — 精确到明确攻击短语的中英文注入检测（误报优先收敛，正常业务用语不拦截）+ 输出脱敏检查
-- **离线评估** — `gpa eval --router` 对内置数据集确定性评估路由命中率（当前 14/14），`gpa eval --full` 跑全链路质量评估
-- **多租户 SaaS** — JWT 认证、org 级数据隔离、分析持久化（PostgreSQL + async SQLAlchemy）、SSE 流式、限流
-
----
-
-## Quick Start
-
-### Docker Compose
-
-```bash
-cp .env.docker .env
-# 编辑 .env —— 至少设置 GPA_LLM_API_KEY 与 GPA_JWT_SECRET
-docker compose up -d
-# API: http://localhost:8000  文档: http://localhost:8000/docs
-```
-
-### 本地开发
+## 30 秒跑起来（零 key）
 
 ```bash
 uv sync --group dev
-cp .env.example .env    # 编辑 .env 设置 GPA_LLM_API_KEY
-
-# 测试（CI 同款环境变量）
-GPA_DEMO_MODE=true GPA_LLM_API_KEY=sk-test-placeholder \
-DB_URL=sqlite+aiosqlite:///./test.db \
-uv run python -m pytest tests/ -v
-
-# Lint + 格式（CI 双重检查）
-uv run ruff check src/ tests/ && uv run ruff format --check src/ tests/
+GPA_DEMO_MODE=true uv run gpa analyze --scope full --query "分析本月用户增长"
 ```
 
-### CLI
+不需要任何 LLM 配置——启发式大脑立即接管：关键词路由 → 确定性专家管线 → 模板报告，全程带降级标记。要接 LLM 大脑见下节。
+
+## LLM 配置：双轨通道
+
+所有配置写 `.env`（已 gitignore）。**通道由 `GPA_LLM_BASE_URL` 自动识别，换脑不改代码：**
+
+| 轨道 | 端点 | 需要 | 说明 |
+|---|---|---|---|
+| 本地·Ollama 原生 | `http://localhost:11434` | 装 [Ollama](https://ollama.com) + pull 模型 | **零 key 零费用零外呼**；openEuler 上 `curl -fsSL https://ollama.com/install.sh \| sh` 即装；原生协议对 think/工具调用行为最好 |
+| 本地·OpenAI 兼容 | `http://localhost:8000` | vLLM / SGLang 起服务 | 自动追加 `/v1`；`GPA_LLM_COMPAT_MODE=true` 可强制 Ollama 也走此轨（逃生门） |
+| 远端·智谱 GLM | `https://open.bigmodel.cn/api/paas/v4` | `GPA_LLM_API_KEY` | 本仓默认端点；Coding Plan 用户改 `/api/coding/paas/v4` |
+| 远端·任意兼容 | DeepSeek / OpenAI / … | `GPA_LLM_API_KEY` | 任意 OpenAI 兼容 chat/completions |
 
 ```bash
-# Agent 主导全链路分析（默认模式：LLM 动态编排专家工具）
-uv run gpa analyze --scope full --query "分析本月用户增长瓶颈" --budget 500000
-
-# 固定 DAG 模式（确定性路由降级方案）
-uv run gpa analyze --scope full --mode workflow --query "分析本月用户增长瓶颈"
-
-# 指定数据文件（prospect / retention 专家会真实加载）
-uv run gpa analyze --scope prospect --data data/user_behavior.csv
-
-# 离线路由评估（无 LLM、秒级、CI 可跑）
-uv run gpa eval --router
-
-# 全链路质量评估（需要 API key）
-uv run gpa eval --full --limit 5
-
-uv run gpa chat        # 交互模式
-uv run gpa kpi         # KPI 快照
+cp .env.example .env   # 改三行即可切轨道
+# 本地轨道示例（什么都不用填，base_url 指向 localhost 即免 key）:
+# GPA_LLM_BASE_URL=http://localhost:11434
+# GPA_LLM_MODEL=qwen3.5:14b
+# 远端轨道示例（智谱）:
+# GPA_LLM_API_KEY=你的key
+# GPA_LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+# GPA_LLM_MODEL=glm-4.7
 ```
 
-### Web API
+角色预设（fast/default/power）只影响温度与可选的按角色模型覆盖（`GPA_ROLE_MODELS`），不再有每角色独立端点。跨厂商兜底（`GPA_FALLBACK_BASE_URL/MODEL`）仅远端→远端有意义——本地轨道的"兜底"就是确定性降级。**小模型工具调用弱不会死循环**：步数上限（默认 12）+ 连续空调用自动翻转启发式大脑（`chief_tools:weak`）。
+
+## CLI 一览
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"user@example.com","password":"pass123","name":"User","org_name":"MyOrg"}'
-
-curl -X POST http://localhost:8000/api/v1/analyze \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"query":"分析本周用户增长","scope":"full","budget":50000}'
+gpa analyze --scope full --query "分析本月用户增长"            # 产品态：成功即静默，只出报告+KPI 表
+gpa analyze --scope subsidy --budget 50000 -v                 # 诊断态：节点级 trace+耗时+降级标记（stderr）
+gpa analyze --scope full --json | jq '.degradations'          # 机器态：整态 JSON，失败/闸门降级退出码 1
+gpa analyze --mode workflow ...                               # 固定 DAG 降级模式
+gpa chat                                                      # 多轮对话（L0 会话记忆，/new /facts）
+gpa eval --router                                             # 确定性路由评测（离线 CI 安全，14/14）
+gpa eval --heuristic                                          # 零 key 回归基线（含字节一致性断言）
+gpa eval --full                                               # 全链路 LLM 评审（需 key）
+gpa kpi / gpa info                                            # KPI 快照 / 系统信息
 ```
 
----
+`-v` 诊断态示例（stderr，产品态成功时静默）：
 
-## Configuration
+```
+┌─ Node Trace ───────────────────────────────┐
+│ plan      │ 1255 │ source=rule n=1         │
+│ tools     │   43 │ subsidy:ok              │
+│ report    │  412 │ chars=775               │
+│ kpi_gate  │  428 │ claims=2 violations=0   │
+└────────────────────────────────────────────┘
+degradations: plan:rule, eval:rule, report:template
+```
 
-所有配置走 `GPA_` 前缀环境变量（`src/core/config.py`）：
+## 架构
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GPA_LLM_PROVIDER` | `openai` | `openai` / `deepseek` / `local`（OpenAI 兼容端点均可） |
-| `GPA_LLM_MODEL` | `glm-4.7` | 主模型 |
-| `GPA_LLM_API_KEY` | — | API key（demo 模式可为占位符） |
-| `GPA_LLM_BASE_URL` | bigmodel.cn | OpenAI 兼容端点 |
-| `GPA_FALLBACK_PROVIDER` | `deepseek` | 跨厂商容灾端点 |
-| `GPA_FALLBACK_API_KEY` | — | fallback 专用 key（不设则 fallback 不可用） |
-| `GPA_FALLBACK_BASE_URL` | — | fallback 专用端点 |
-| `GPA_MODEL_TIERS_*` | 见 config | fast/default/power 三档模型路由 |
-| `GPA_QUALITY_THRESHOLD` | `0.7` | 评估低于此分数触发 refine |
-| `GPA_MAX_REFINEMENT_ROUNDS` | `2` | 质量循环上限 |
-| `GPA_BUDGET_APPROVAL_THRESHOLD` | `10000` | 超过此预算触发人工审批 |
-| `GPA_DEMO_MODE` | `false` | 允许占位 key + MemorySaver checkpoint |
-| `GPA_ORCHESTRATION_MODE` | `agent` | `agent`（LLM 工具循环）/ `workflow`（固定 DAG） |
+```
+                    ┌────────────────────────────────────────────────────┐
+   agent 模式(默认)  │ guard → plan → agent ⇄ tools → evaluate ─┬→ agent │
+                    │        (子目标)  (LLM/启发式)              │(反馈≤2轮)
+                    │                                          ↓
+                    │              approval(高预算 interrupt) → report → kpi_gate → END
+                    ├────────────────────────────────────────────────────┤
+   workflow 模式    │ plan → execute(并行专家) → evaluate ⇄ refine → approval → report → kpi_gate → END
+                    ├────────────────────────────────────────────────────┤
+   专家层           │ prospect / conversion / subsidy / retention / ad    │
+                    │ (确定性 ML 管线 + BaseAgent 生命周期 hook/中间件)    │
+                    ├────────────────────────────────────────────────────┤
+   工具层           │ LightGBM 意向/流失 · HiGHS 整数规划 · statsmodels    │
+                    │ 因果推断 · BG/NBD LTV · 漏斗/归因/RTA               │
+                    ├────────────────────────────────────────────────────┤
+   记忆层           │ L0 会话(近轮全量+更早结构化压缩) · L1 事实台账        │
+                    │ (写闸=成功∧校验∧有KPI，读不豁免闸门) · L2 别名       │
+                    └────────────────────────────────────────────────────┘
+```
 
-> **Fallback 说明**：fallback 与主模型相同（provider+model+端点一致）时会被自动禁用并告警——自我容灾没有意义。要启用真实容灾，配置一个不同厂商的 `GPA_FALLBACK_*`。
+**Agent 四支柱与边界**：
 
----
+| 支柱 | 落地 | 边界（不破坏对账底线） |
+|------|------|------|
+| **Planning** | `plan` 节点输出结构化子目标（≤5）；校验器**只删不造**（白名单交集/去重/封顶/空问题丢弃）；子目标清单带 ☐/☑/☒ 状态进 chief 提示词 | 校验器永不新增 LLM 没点名的专家；无 LLM 退关键词先验（`plan:rule`） |
+| **Memory** | L0 会话（近 3 轮全量+更早压缩为结构化摘要，**永不继承自由文本**）；L1 事实台账（键=org+domain+metric，写闸=success∧validated∧kpis）；L2 别名（组织词汇表驱动路由） | 台账只存数字不存散文；**读不豁免**——命中数字照样过对账闸门 |
+| **Tool Use** | ACI 式自描述规格（用途/何时调用/参数/**失败模式**）；工具失败返回可解释 digest 而非栈回溯 | 白名单只有内部确定性工具；ad 专家诚实标注 `data_source=synthetic` |
+| **ReAct** | 步级四元组 thought/action/obs/gate 进 state；`-v` 逐行可重放 | 步数硬上限 12 + 幂等子目标状态 + 连续空调用翻转启发式大脑 |
 
-## Agent Matrix
+**长程可靠性**——单步 95% 可靠的任务 20 步只剩 ~36% 成功，该改的是传播结构：
 
-| Expert | 职责 | 工具 | KPIs (标准化输出) |
-|--------|------|------|-------------------|
-| **prospect** | 意向预测、评分排序、RFM 分群、LTV | `FeatureEngine` `IntentModel`(LightGBM) `UserScorer` `UserSegmentor` `LTVPredictor`(BG/NBD) | `total_users` `intent_auc` |
-| **conversion** | 漏斗、触达规划、投放位、优惠券、归因 | `FunnelAnalyzer` `ReachPlanner` `SlotAllocator` `CouponDesigner` `Attributor` | `conversion_rate` `funnel_bottleneck_rate` |
-| **subsidy** | 因果推断(ATE)、弹性、预算优化 | `CausalInferenceEngine`(DoWhy) `ElasticityEstimator` `BudgetOptimizer`(PuLP) `SubsidyAllocator` | `expected_roi` `subsidy_ate` |
-| **retention** | 流失预警、同期群、养成、召回 | `ChurnPredictor` `CohortAnalyzer` `NurturePlanner` `WinbackPlanner` | `churn_high_risk_ratio` `churn_model_auc` |
-| **ad** | RTA、出价、创意、受众 | `RTAStrategy` `BidOptimizer` `CreativeAnalyzer` `AudienceAnalyzer` | `ad_target_cpa` `ad_win_rate` 等 |
+```
+P(错误答案) ≤ Σₖ eₖ·gₖ    eₖ=第k步出错率（模型决定）  gₖ=错误穿过该步闸门的存活率（代码决定）
+```
 
-每个专家结果携带标准化 `kpis` 字典，workflow 层单点聚合为 `kpi_snapshot`。
+四个杠杆：能确定化的环节不给模型（模板报告/确定性打分）；verify-as-you-go（闸门拦截推进到步级）；结构化传递（字段复制不文本重释）；并行分支不乘法（专家各自过闸）。失败形态是**安全失败**（降级/对账附录/诚实标记），不是自信的错误答案。
 
----
+## 30 秒理解对账闸门
 
-## Design Decisions
+```python
+from src.core.kpi_gate import reconcile
+reconcile("转化率 8%，ROI 2.1x", {"conversion_rate": 0.08, "expected_roi": 2.1})
+# → {'claims': 2, 'violations': [], 'ok': True}        ✓ 8%≡0.08 对上账
 
-### Why LangGraph over CrewAI / AutoGen?
+reconcile("转化率 99% 创历史新高", {"conversion_rate": 0.08})
+# → {'claims': 1, 'violations': [...], 'ok': False}    ✗ 编造被拦，报告降级模板+对账附录
+```
 
-| Dimension | LangGraph | CrewAI | AutoGen |
-|-----------|-----------|--------|---------|
-| 拓扑控制 | 显式 StateGraph + 条件边 | 隐式串行/层级 | 会话驱动 |
-| 状态管理 | TypedDict + reducer 注解 | 内部状态 | dict 传递 |
-| 中断恢复 | `interrupt_before` + checkpointer | 有限 | 有限 |
-| 观测性 | 节点级事件 + LangSmith | 有限 | 有限 |
+## Web API
 
-本项目的 refine 循环、HITL 审批中断、按 expert 键替换的 reducer 都依赖 LangGraph 的一等支持。
+```bash
+make web    # http://localhost:8000/docs
+```
 
-### Why Tools-First, AI-Interpret?
+JWT 多租户：`POST /auth/register` → `POST /analyze`（sync）/ `POST /analyze/stream`（SSE，按模式分发节点事件）→ `GET /analyses/{id}/state`（checkpoint 状态）→ `POST /analyses/{id}/approve`（HITL 恢复，线程纪律 `org:analysis_id`）。记忆端点：`GET/DELETE /memory`、`GET/PUT /memory/aliases`（L2）、`GET /memory/facts`（L1 台账）。
 
-LightGBM 预测、DoWhy 因果估计、PuLP 优化结果是**数学事实**，不应由 LLM 幻觉生成。LLM 的角色严格限定在：解读工具输出的业务含义、跨专家综合、生成可执行建议。这保证数据层**确定性、可审计**，策略层才有推理弹性。
+## 测试与评测
 
-### Why TypedDict State + Pydantic Boundary?
+```bash
+make test          # 全量（500+ 用例）
+gpa eval --router  # 确定性路由评测：14/14
+gpa eval --heuristic  # 零 key 回归基线：success/路由/KPI/报告/字节一致 五断言
+```
 
-LangGraph 的状态通道需要 `Annotated[..., reducer]` 支持并行合并，Pydantic 模型不原生支持。方案：图状态用 TypedDict + 自定义 reducer，Agent 边界用 Pydantic（`EXPERT_RESULT_MODELS`）做结构化校验，两套体系各司其职。
+确定性不变式保护所有后续重构：**同输入 + 零 key 模式 ⇒ 字节一致的报告**——它真实抓到过三个潜伏 bug（LightGBM 多线程训练不确定、合成数据用墙钟时间锚点导致 recency 特征漂移、共享 checkpoint 线程跨运行泄漏状态）。
 
-### 演示数据说明（诚实声明）
+## 目录
 
-无外部数据时，管线生成**与特征相关的合成数据**：意向标签由特征线性组合 + sigmoid + Bernoulli 噪声合成（约 8% 基率），LTV 由同一信号驱动对数正态分布。因此演示环境下的 AUC 等指标有信息量但非业务真实值——接入 `--data` 后 prospect/retention 使用真实数据。
+```
+src/
+├── agent/            # agent 模式: plan/chief 循环/工具规格/四元组观测
+├── graph/            # workflow DAG · nodes · gate_node(对账闸门) · runtime(图缓存)
+├── core/             # config(双轨通道) · llm_factory · kpi_gate · expert 基类
+│                     # · evaluator · token_tracker(按运行归因) · guardrails
+├── agents/           # 5 个领域专家（确定性管线 + Jinja2 综合提示词）
+├── tools/            # 确定性 ML 工具（LightGBM/HiGHS/statsmodels/BG-NBD）
+├── memory/           # store.py: L0/L1/L2 + FTS5 情景检索（SQLite，异步）
+├── web/              # FastAPI 包: app + routers/{auth,analyses,memory}
+├── evals/            # 内置评测集 + 评测器
+└── cli.py            # gpa 命令（观测三档 / eval 三模式 / chat L0）
+docs/DESIGN-v9.md     # 四支柱设计文档（本 README 的完整推理链）
+```
 
----
+## 配置迁移（v8 → v9）
 
-## Tech Stack
+| v8 | v9 | 说明 |
+|---|---|---|
+| `GPA_LLM_PROVIDER` | 删除 | 通道由 `GPA_LLM_BASE_URL` 自动识别 |
+| `GPA_MODEL_TIERS`（JSON） | `GPA_ROLE_TEMPERATURES` / `GPA_ROLE_MODELS` | 角色预设替代分层端点 |
+| `GPA_FALLBACK_PROVIDER` | `GPA_FALLBACK_BASE_URL` + `GPA_FALLBACK_MODEL` | 兜底仅远端→远端 |
+| `GPA_MEMORY_BASE_PATH` | `GPA_MEMORY_DB_PATH` | SQLite 单文件替代目录树 |
+| `GPA_EXPERT_MODEL_TIER` | 删除 | 专家统一 default 角色 |
+| `DB_URL` | `GPA_DB_URL` | 修复前缀缺失（旧值从未生效） |
 
-| Category | Technology |
-|----------|-----------|
-| 编排 | LangGraph StateGraph + Checkpointer（PostgreSQL / Memory） |
-| LLM | OpenAI 兼容端点（GLM / GPT / DeepSeek / Ollama），三层 tier 路由 |
-| ML | LightGBM · DoWhy · PuLP · lifetimes(BG/NBD) · SHAP · statsmodels |
-| 服务 | FastAPI · SSE · slowapi · JWT · async SQLAlchemy · Alembic |
-| 记忆 | ChromaDB 向量检索（TF-IDF 无依赖回退） |
-| 质量 | pytest（452 用例）· Ruff（lint + format）· OpenTelemetry |
+新增：`GPA_KPI_GATE`（on/annotate/off）、`GPA_KPI_GATE_THRESHOLD`、`GPA_AGENT_MAX_STEPS`、`GPA_LLM_COMPAT_MODE`。
 
----
+## FAQ
+
+- **没有 key 能用吗？** 能，且是默认。启发式大脑跑同一张图，报告带 `plan:rule`/`report:template` 等可见降级标记；`gpa eval --heuristic` 是可复现的回归基线。
+- **本地小模型工具调用很弱怎么办？** 步数上限兜底 + 连续空调用自动翻转到启发式大脑（`chief_tools:weak`）；或 `GPA_LLM_COMPAT_MODE=true` 换 OpenAI 兼容端点试 function calling。
+- **闸门会不会误伤合法数字？** 词表邻近域限定（数字须靠近 KPI 词才算断言）、显示精度容差、`annotate` 模式与 `GPA_KPI_GATE_THRESHOLD` 可调；行为被 `test_kpi_gate.py` 钉死。
+- **HITL 审批怎么用？** `POST /analyze` 带 `approval_required=true` 且预算 ≥ 阈值（默认 ¥10,000）→ 运行在 approval 前 interrupt → `POST /analyses/{id}/approve` 恢复。
+- **macOS 上 LightGBM 报 libomp 缺失？** `brew install libomp`。求解器已切 HiGHS（pulp 自带 CBC 二进制在 ARM Mac 上不可用）。
+- **v8 的记忆数据会丢吗？** 不会，首次启动自动把 `memory_store.json` 导入 SQLite（原文件保留为 `.migrated`）。
+
+## Roadmap
+
+- [x] v9.0.0 双轨通道 · 四支柱 · 对账闸门 · 确定性基线 · Web 层修复
+- [ ] v9.1 LLM 通道真机验收矩阵（Ollama 小档/大档 × agent/workflow × 闸门）
+- [ ] v9.2 真实数据接口（广告平台连接器替换 synthetic 标注；实验数据 schema 导入）
+- [ ] v9.3 多轮会话的台账继承策略与 eₖ/gₖ 实测表
 
 ## License
 
-[MIT](./LICENSE)
+MIT

@@ -1,3 +1,5 @@
+> **历史文档：v2 时代技术架构（2026-04，Orchestrator 分发时代）。已被 docs/DESIGN-v9.md 取代，保留供追溯。**
+
 # GrowthPilot Agent — 技术架构文档
 
 > 版本：v2.0 | 日期：2026-04-21
