@@ -114,3 +114,26 @@ class TestGetSettings:
         get_settings.cache_clear()
         s2 = get_settings()
         assert s1 is not s2
+
+
+class TestDemoJwtSecret:
+    """C13: demo mode must not run on the KNOWN default secret."""
+
+    def test_demo_mode_gets_ephemeral_secret(self):
+        from src.core.config import Settings
+
+        s = Settings(demo_mode=True, _env_file=None)
+        assert s.jwt_secret != "change-me-in-production"
+
+    def test_two_demo_instances_differ(self):
+        from src.core.config import Settings
+
+        a = Settings(demo_mode=True, _env_file=None)
+        b = Settings(demo_mode=True, _env_file=None)
+        assert a.jwt_secret != b.jwt_secret
+
+    def test_non_demo_keeps_explicit_default_so_startup_guard_fires(self):
+        from src.core.config import Settings
+
+        s = Settings(demo_mode=False, jwt_secret="change-me-in-production", _env_file=None)
+        assert s.jwt_secret == "change-me-in-production"  # app.py lifespan raises on this

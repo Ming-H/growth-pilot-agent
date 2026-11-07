@@ -194,13 +194,22 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_security(self) -> "Settings":
-        if not self.demo_mode and self.jwt_secret == "change-me-in-production":
-            import logging
+        if self.jwt_secret == "change-me-in-production":
+            if self.demo_mode:
+                # C13: a demo run must not sit on a KNOWN secret — anyone
+                # could forge tokens (including a prod instance that also
+                # flipped GPA_DEMO_MODE on). Ephemeral per-process secret:
+                # tokens die with the process, nothing left to forge.
+                import secrets as _secrets
 
-            logging.getLogger(__name__).warning(
-                "Default JWT secret detected in non-demo mode. "
-                "Set GPA_JWT_SECRET to a secure random string."
-            )
+                self.jwt_secret = _secrets.token_urlsafe(48)
+            else:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Default JWT secret detected in non-demo mode. "
+                    "Set GPA_JWT_SECRET to a secure random string."
+                )
         return self
 
 

@@ -201,6 +201,48 @@ async def analyze(
 # ---------------------------------------------------------------------------
 
 
+async def _persist_stream_status(
+    analysis_id: str, *, status: str, error_message: str, elapsed: float
+) -> None:
+    """Best-effort outcome persistence for streaming runs (C4).
+
+    Used from the generator's exception AND cancellation paths — a
+    cancellation must also leave an honest row status behind.
+    """
+    try:
+        session_factory = get_session_factory()
+        async with session_factory() as update_db:
+            result_db = await update_db.execute(
+                select(Analysis).where(Analysis.id == analysis_id)
+            )
+            analysis_obj = result_db.scalar_one_or_none()
+            if analysis_obj:
+                analysis_obj.status = status
+                analysis_obj.error_message = error_message
+                analysis_obj.duration_seconds = elapsed
+                analysis_obj.completed_at = datetime.now(timezone.utc)
+                await update_db.commit()
+    except Exception as db_exc:
+        logger.warning("Failed to persist stream status %s: %s", status, db_exc)
+
+
+async def _get_org_analysis(db: AsyncSession, analysis_id: str, user: User) -> Analysis:
+    """Fetch an analysis row scoped to the caller's org (C5).
+
+    HITL endpoints previously read the row WITHOUT the org filter — the
+    org-scoped thread_id kept the checkpoint private, but the row itself
+    (mode, existence) leaked cross-org, and same-org members could act on
+    analyses they did not create.
+    """
+    result = await db.execute(
+        select(Analysis).where(Analysis.id == analysis_id, Analysis.org_id == user.org_id)
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Analysis {analysis_id} not found")
+    return row
+
+
 @router.post("/analyze/stream")
 @_limit_analyze
 async def analyze_stream(
@@ -360,6 +402,19 @@ async def analyze_stream(
             if org:
                 org.usage_count += 1
 
+        except asyncio.CancelledError:
+            # C4: client disconnect cancels this generator — CancelledError
+            # inherits BaseException and escapes `except Exception`, so the
+            # row used to stay "running" forever. Persist the interruption
+            # (the checkpoint survives — /resume can continue the run),
+            # then let the cancellation propagate as required.
+            _persist_stream_status(
+                analysis_id,
+                status="interrupted",
+                error_message="SSE client disconnected; run interrupted (checkpoint retained)",
+                elapsed=time.monotonic() - start_time,
+            )
+            raise
         except Exception as exc:
             elapsed = time.monotonic() - start_time
             logger.error("Stream workflow failed: %s", exc)
@@ -371,21 +426,9 @@ async def analyze_stream(
                     data={"error": str(exc)},
                 )
             )
-            try:
-                session_factory = get_session_factory()
-                async with session_factory() as update_db:
-                    result_db = await update_db.execute(
-                        select(Analysis).where(Analysis.id == analysis_id)
-                    )
-                    analysis_obj = result_db.scalar_one_or_none()
-                    if analysis_obj:
-                        analysis_obj.status = "failed"
-                        analysis_obj.error_message = str(exc)
-                        analysis_obj.duration_seconds = elapsed
-                        analysis_obj.completed_at = datetime.now(timezone.utc)
-                        await update_db.commit()
-            except Exception as db_exc:
-                logger.warning("Failed to mark stream analysis as failed: %s", db_exc)
+            _persist_stream_status(
+                analysis_id, status="failed", error_message=str(exc), elapsed=elapsed
+            )
             yield {
                 "event": "error",
                 "data": EventData(
@@ -453,8 +496,8 @@ async def get_analysis_state(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AnalysisStateResponse:
-    row = await db.get(Analysis, analysis_id)
-    mode = (row.mode if row else None) or get_settings().orchestration_mode
+    row = await _get_org_analysis(db, analysis_id, user)
+    mode = row.mode or get_settings().orchestration_mode
     config = {"configurable": {"thread_id": thread_id_for(user.org_id, analysis_id)}}
     graph = await get_graph_for(mode)
 
@@ -491,8 +534,15 @@ async def approve_analysis(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ApprovalResponse:
-    row = await db.get(Analysis, analysis_id)
-    mode = (row.mode if row else None) or get_settings().orchestration_mode
+    row = await _get_org_analysis(db, analysis_id, user)
+    # C5: approve is only valid while the run is actually paused/pending —
+    # without this guard two concurrent approves double-invoke the graph.
+    if row.status not in {"running", "awaiting_approval"}:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Analysis is '{row.status}'; approve requires a running/awaiting_approval run",
+        )
+    mode = row.mode or get_settings().orchestration_mode
     config = {"configurable": {"thread_id": thread_id_for(user.org_id, analysis_id)}}
     graph = await get_graph_for(mode)
 
@@ -540,8 +590,12 @@ async def resume_analysis(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ResumeResponse:
-    row = await db.get(Analysis, analysis_id)
-    mode = (row.mode if row else None) or get_settings().orchestration_mode
+    row = await _get_org_analysis(db, analysis_id, user)
+    if row.status in {"completed", "rejected"}:
+        raise HTTPException(
+            status_code=409, detail=f"Analysis already '{row.status}' — nothing to resume"
+        )
+    mode = row.mode or get_settings().orchestration_mode
     config = {"configurable": {"thread_id": thread_id_for(user.org_id, analysis_id)}}
     graph = await get_graph_for(mode)
 
