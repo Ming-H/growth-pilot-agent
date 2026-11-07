@@ -59,3 +59,73 @@ class TestChannelResponseModel:
         a = self._make(context_kpis={"subsidy_expected_roi": 2.0}).grid("subsidy")
         b = self._make(context_kpis={"subsidy_expected_roi": 2.0}).grid("subsidy")
         assert a == b
+
+
+class TestGlobalBudgetAllocator:
+    """IP allocation with exact-enumeration fallback."""
+
+    def _grids(self, budget: float = 200_000.0):
+        from src.tools.budget.response_curves import ChannelResponseModel
+
+        m = ChannelResponseModel(total_budget=budget)
+        return {c: m.grid(c) for c in m.channels}
+
+    def _alloc(self, budget: float = 200_000.0):
+        from src.tools.budget.global_allocator import GlobalBudgetAllocator
+
+        return GlobalBudgetAllocator().allocate(self._grids(budget), total_budget=budget)
+
+    def test_allocation_respects_total_budget(self):
+        r = self._alloc()
+        assert r["status"] == "optimal"
+        assert sum(r["allocation"].values()) <= 200_000.0 + 1e-6
+
+    def test_best_channel_gets_largest_share(self):
+        """Subsidy has the strongest low-spend response in the defaults."""
+        r = self._alloc()
+        assert max(r["allocation"], key=r["allocation"].get) in {"subsidy", "ad"}
+
+    def test_per_channel_cap_respected(self):
+        from src.tools.budget.response_curves import ChannelResponseModel
+
+        m = ChannelResponseModel(total_budget=200_000.0)
+        r = self._alloc()
+        for channel, spend in r["allocation"].items():
+            assert spend <= m.channel_cap(channel) + 1e-6
+
+    def test_zero_budget_errors(self):
+        """Allocator-level guard (the curve model raises its own ValueError)."""
+        from src.tools.budget.global_allocator import GlobalBudgetAllocator
+
+        r = GlobalBudgetAllocator().allocate(self._grids(), total_budget=0)
+        assert "error" in r
+
+    def test_expected_roi_consistent(self):
+        r = self._alloc()
+        spent = sum(r["allocation"].values())
+        assert r["expected_incremental_gmv"] >= 0
+        if spent > 0:
+            assert r["expected_roi"] == round(r["expected_incremental_gmv"] / spent, 4)
+
+    def test_enumeration_fallback_matches_ip(self):
+        """With PuLP monkeypatched out, enumeration must find the same optimum."""
+        import src.tools.budget.global_allocator as ga
+
+        grids = self._grids()
+        ip = ga.GlobalBudgetAllocator().allocate(grids, total_budget=200_000.0)
+        real_has = ga.HAS_PULP
+        ga.HAS_PULP = False
+        try:
+            enum = ga.GlobalBudgetAllocator().allocate(grids, total_budget=200_000.0)
+        finally:
+            ga.HAS_PULP = real_has
+        assert enum["solver_method"] == "enumeration"
+        assert enum["expected_incremental_gmv"] == pytest.approx(
+            ip["expected_incremental_gmv"], rel=1e-9
+        )
+
+    def test_deterministic(self):
+        a = self._alloc()
+        b = self._alloc()
+        assert a["allocation"] == b["allocation"]
+        assert a["expected_incremental_gmv"] == b["expected_incremental_gmv"]
