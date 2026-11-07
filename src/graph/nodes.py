@@ -67,6 +67,7 @@ Available experts (pick one or more):
 - subsidy (补贴策略): causal inference for subsidy ATE, elasticity estimation, budget optimization
 - retention (用户留存): churn prediction, nurture planning, cohort analysis, win-back strategy
 - ad (广告投放): RTA strategy, bid optimization, creative analysis, audience targeting
+- budget (预算统筹): cross-channel budget allocation across ad/subsidy/retention/conversion
 
 User query: {query}
 Scope hint: {scope}
@@ -90,6 +91,7 @@ def _get_expert_cls(expert_key: str) -> type:
         "subsidy": "src.agents.subsidy.SubsidyExpert",
         "retention": "src.agents.retention.RetentionExpert",
         "ad": "src.agents.ad.AdExpert",
+        "budget": "src.agents.budget.BudgetExpert",
     }
     if expert_key not in import_map:
         raise ValueError(f"Unknown expert key: {expert_key}")
@@ -301,6 +303,7 @@ def _intent_classify(query: str) -> list[str]:
         ("subsidy", "src.agents.subsidy.SubsidyExpert"),
         ("retention", "src.agents.retention.RetentionExpert"),
         ("ad", "src.agents.ad.AdExpert"),
+        ("budget", "src.agents.budget.BudgetExpert"),
     ]:
         try:
             module_path, class_name = path.rsplit(".", 1)

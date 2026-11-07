@@ -31,7 +31,7 @@ from src.graph.state import AnalysisStatus
 
 logger = logging.getLogger(__name__)
 
-_EXPERT_WHITELIST = ("prospect", "conversion", "subsidy", "retention", "ad")
+_EXPERT_WHITELIST = ("prospect", "conversion", "subsidy", "retention", "ad", "budget")
 _MAX_SUBGOALS = 5
 
 

@@ -123,7 +123,7 @@ class TestPlanNode:
 
             result = await plan_node(state)
 
-        assert len(result["selected_experts"]) == 5
+        assert len(result["selected_experts"]) == 6
 
 
 # ---------------------------------------------------------------------------
@@ -569,3 +569,32 @@ class TestReportNode:
 
         assert result["status"] == AnalysisStatus.COMPLETED
         assert "filtered" in result["final_report"].lower()
+
+
+class TestBudgetRouting:
+    """Budget expert wiring: router, factory, planner whitelist."""
+
+    def test_intent_classify_routes_global_budget_query(self):
+        from src.graph.nodes import _intent_classify
+
+        selected = _intent_classify("预算在投放和补贴之间怎么分配？")
+        assert "budget" in selected
+
+    def test_intent_classify_does_not_poach_subsidy_budget(self):
+        from src.graph.nodes import _intent_classify
+
+        selected = _intent_classify("补贴预算优化怎么做")
+        assert "budget" not in selected
+        assert "subsidy" in selected
+
+    def test_create_expert_budget(self):
+        from src.agents.budget import BudgetExpert
+        from src.graph.nodes import _create_expert
+
+        expert = _create_expert("budget")
+        assert isinstance(expert, BudgetExpert)
+
+    def test_chief_whitelist_includes_budget(self):
+        from src.agent.chief import _EXPERT_WHITELIST
+
+        assert "budget" in _EXPERT_WHITELIST
