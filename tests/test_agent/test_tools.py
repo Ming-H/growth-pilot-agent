@@ -15,7 +15,7 @@ from src.agent.tools import (
 
 
 class TestToolSpecs:
-    def test_six_tools_exposed(self):
+    def test_seven_tools_exposed(self):
         specs = build_tool_specs()
         names = {s.name for s in specs}
         assert names == {
@@ -24,12 +24,13 @@ class TestToolSpecs:
             "run_subsidy_analysis",
             "run_retention_analysis",
             "run_ad_analysis",
+            "run_budget_analysis",
             "search_memory",
         }
 
     def test_langchain_tools_render_schemas(self):
         tools = to_langchain_tools(build_tool_specs())
-        assert len(tools) == 6
+        assert len(tools) == 7
         by_name = {t.name: t for t in tools}
         assert "query" in by_name["run_prospect_analysis"].args_schema.model_fields
         # subsidy takes budget, memory search does not
@@ -113,3 +114,43 @@ class TestAdDataHonesty:
 
         result = AdExpert(llm=None)._execute_pipeline({"query": "广告", "budget": 0})
         assert result.get("data_source") == "synthetic"
+
+
+class TestBudgetToolSpec:
+    """Budget chief-tool registration + context_kpis plumbing."""
+
+    def test_budget_tool_registered_with_failure_modes(self):
+        from src.agent.tools import EXPERT_TOOL_FAILURE_MODES, get_spec_by_name
+
+        spec = get_spec_by_name("run_budget_analysis")
+        assert spec is not None
+        assert "budget" in EXPERT_TOOL_FAILURE_MODES
+        assert "跨渠道" in spec.description
+
+    @pytest.mark.asyncio
+    async def test_budget_tool_dispatch_carries_context_kpis(self, monkeypatch):
+        """context_kpis (from kpi_snapshot) must reach the expert params."""
+        from src.agent import tools as agent_tools
+
+        captured = {}
+
+        async def _capture_run(state):
+            captured.update(state["params"])
+            return {
+                "success": True,
+                "expert": "budget",
+                "kpis": {"expected_roi": 1.5},
+                "allocation": {"ad": 1.0},
+            }
+
+        fake = MagicMock()
+        fake.run = AsyncMock(side_effect=_capture_run)
+        monkeypatch.setattr("src.graph.nodes._create_expert", lambda key: fake)
+
+        digest = await agent_tools.execute_tool_call_async(
+            {"query": "全局预算分配", "budget": 100_000, "kpi_snapshot": {"subsidy_expected_roi": 2.0}},
+            "run_budget_analysis",
+            {"query": "全局预算分配", "budget": 100_000},
+        )
+        assert captured["context_kpis"] == {"subsidy_expected_roi": 2.0}
+        assert digest["success"] is True

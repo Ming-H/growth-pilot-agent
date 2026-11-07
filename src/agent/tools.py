@@ -112,6 +112,10 @@ def _run_expert_tool(
         "budget": budget or state.get("budget") or 0,
         "data_path": state.get("data_path") or "",
         "memory_context": [],  # the agent decides memory usage via search_memory
+        # KPIs sibling experts already produced in this run — the budget
+        # expert consumes them to calibrate its response curves; other
+        # experts ignore the key (coordination without coupling).
+        "context_kpis": dict(state.get("kpi_snapshot") or {}),
     }
     settings = get_settings()
     expert = _create_expert(expert_key)
@@ -214,6 +218,15 @@ EXPERT_TOOL_DESCRIPTIONS: dict[str, str] = {
         "【失败模式】当前版本始终使用内置合成数据（data_source=synthetic，"
         "忽略 data_path）——接入真实广告平台数据在路线图中。"
     ),
+    "budget": (
+        "【用途】全局预算统筹：在投放(ad)/补贴(subsidy)/召回(retention)/券(conversion)"
+        "四个渠道间分配总预算。响应曲线边际递减(log1p 饱和)，整数规划求全局最优切分；"
+        "若本运行已有其他专家产出 KPI(如补贴 ROI)会自动校准曲线。"
+        "【何时调用】问题涉及跨渠道预算分配、统筹、预算怎么分、marketing mix 时。"
+        "【参数】query + budget（必须提供，单位 CNY）。"
+        "【失败模式】budget 缺失或非正数时报错；无先验专家结果时用默认曲线"
+        "（data_source=default_curves）；求解器不可用时精确枚举兜底（method=enumeration）。"
+    ),
 }
 
 EXPERT_TOOL_FAILURE_MODES: dict[str, list[str]] = {
@@ -222,6 +235,7 @@ EXPERT_TOOL_FAILURE_MODES: dict[str, list[str]] = {
     "subsidy": ["heuristic_ate_fallback", "greedy_allocation_fallback"],
     "retention": ["low_auc_warning", "template_winback_fallback"],
     "ad": ["synthetic_data_only"],
+    "budget": ["missing_budget", "default_curves_uncalibrated", "solver_fallback_enumeration"],
 }
 
 
