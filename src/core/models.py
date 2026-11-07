@@ -157,6 +157,21 @@ class AdResult(AgentResult):
     scope: str = "full"
 
 
+class BudgetResult(AgentResult):
+    """Result from BudgetExpert (global budget orchestration)."""
+
+    agent_name: str = "budget"
+    allocation: dict[str, float] = Field(default_factory=dict)
+    channel_details: dict[str, Any] = Field(default_factory=dict)
+    expected_incremental_gmv: float = 0.0
+    expected_roi: float = 0.0
+    total_spend: float = 0.0
+    unallocated: float = 0.0
+    solver_method: str = ""
+    data_source: str = "default_curves"
+    analysis: LLMAnalysis = Field(default_factory=LLMAnalysis)
+
+
 # ---------------------------------------------------------------------------
 # Expert result model mapping (used by graph nodes for validation)
 # ---------------------------------------------------------------------------
@@ -167,4 +182,5 @@ EXPERT_RESULT_MODELS: dict[str, type[AgentResult]] = {
     "subsidy": SubsidyResult,
     "retention": RetentionResult,
     "ad": AdResult,
+    "budget": BudgetResult,
 }

@@ -129,3 +129,21 @@ class TestGlobalBudgetAllocator:
         b = self._alloc()
         assert a["allocation"] == b["allocation"]
         assert a["expected_incremental_gmv"] == b["expected_incremental_gmv"]
+
+
+class TestBudgetResultModel:
+    def test_validate_expert_result_marks_validated(self):
+        from src.core.models import EXPERT_RESULT_MODELS
+        from src.graph.nodes import _validate_expert_result
+
+        assert "budget" in EXPERT_RESULT_MODELS
+        result = {
+            "success": True,
+            "allocation": {"ad": 60_000.0, "subsidy": 90_000.0},
+            "expected_incremental_gmv": 320_000.0,
+            "expected_roi": 1.8,
+            "kpis": {"budget_total": 200_000.0, "expected_roi": 1.8},
+        }
+        out = _validate_expert_result("budget", result)
+        assert out["_validated"] is True
+        assert out["agent_name"] == "budget"
