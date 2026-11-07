@@ -83,19 +83,26 @@ Reply with ONLY a JSON object:
 # ---------------------------------------------------------------------------
 
 
+# Single source of truth for the expert registry — the router list,
+# the expert factory, and the plan-LLM whitelist all derive from it
+# (a second hand-maintained tuple silently dropped LLM-planned experts).
+_EXPERT_IMPORTS: dict[str, str] = {
+    "prospect": "src.agents.prospect.ProspectExpert",
+    "conversion": "src.agents.conversion.ConversionExpert",
+    "subsidy": "src.agents.subsidy.SubsidyExpert",
+    "retention": "src.agents.retention.RetentionExpert",
+    "ad": "src.agents.ad.AdExpert",
+    "budget": "src.agents.budget.BudgetExpert",
+}
+
+_EXPERT_KEYS = tuple(_EXPERT_IMPORTS)
+
+
 def _get_expert_cls(expert_key: str) -> type:
     """Lazy-import and return the ExpertAgentBase subclass for *expert_key*."""
-    import_map: dict[str, str] = {
-        "prospect": "src.agents.prospect.ProspectExpert",
-        "conversion": "src.agents.conversion.ConversionExpert",
-        "subsidy": "src.agents.subsidy.SubsidyExpert",
-        "retention": "src.agents.retention.RetentionExpert",
-        "ad": "src.agents.ad.AdExpert",
-        "budget": "src.agents.budget.BudgetExpert",
-    }
-    if expert_key not in import_map:
+    if expert_key not in _EXPERT_IMPORTS:
         raise ValueError(f"Unknown expert key: {expert_key}")
-    module_path, class_name = import_map[expert_key].rsplit(".", 1)
+    module_path, class_name = _EXPERT_IMPORTS[expert_key].rsplit(".", 1)
     import importlib
 
     module = importlib.import_module(module_path)
@@ -247,11 +254,7 @@ async def plan_node(state: AnalysisState) -> dict:  # noqa: D401
             content = content.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
 
         plan_data: dict[str, Any] = json.loads(content)
-        selected_experts = [
-            e
-            for e in plan_data.get("experts", [])
-            if e in ("prospect", "conversion", "subsidy", "retention", "ad")
-        ]
+        selected_experts = [e for e in plan_data.get("experts", []) if e in _EXPERT_KEYS]
 
         # Fallback: if LLM returned no valid experts, use intent classification
         if not selected_experts:
@@ -297,14 +300,7 @@ def _intent_classify(query: str) -> list[str]:
     import importlib
 
     expert_classes: dict[str, type] = {}
-    for key, path in [
-        ("prospect", "src.agents.prospect.ProspectExpert"),
-        ("conversion", "src.agents.conversion.ConversionExpert"),
-        ("subsidy", "src.agents.subsidy.SubsidyExpert"),
-        ("retention", "src.agents.retention.RetentionExpert"),
-        ("ad", "src.agents.ad.AdExpert"),
-        ("budget", "src.agents.budget.BudgetExpert"),
-    ]:
+    for key, path in _EXPERT_IMPORTS.items():
         try:
             module_path, class_name = path.rsplit(".", 1)
             expert_classes[key] = getattr(importlib.import_module(module_path), class_name)

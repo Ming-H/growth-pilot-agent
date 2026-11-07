@@ -598,3 +598,46 @@ class TestBudgetRouting:
         from src.agent.chief import _EXPERT_WHITELIST
 
         assert "budget" in _EXPERT_WHITELIST
+
+
+class TestPlanLLMWhitelist:
+    """The plan-LLM filter must accept every registered expert (A9:
+    a second hand-maintained tuple silently dropped LLM-planned budget)."""
+
+    @pytest.mark.asyncio
+    async def test_llm_planned_budget_expert_not_dropped(self):
+        """workflow plan_node LLM path: experts=["budget"] survives filtering."""
+        from src.graph.nodes import _EXPERT_KEYS, plan_node
+
+        assert "budget" in _EXPERT_KEYS
+        mock_response = MagicMock()
+        mock_response.content = json.dumps(
+            {"reasoning": "cross-channel budget", "experts": ["budget", "prospect"],
+             "context_summary": "budget allocation"}
+        )
+        with (
+            patch("src.guardrails.input_guard.validate_input") as mock_validate,
+            patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm,
+        ):
+            mock_validate.return_value = MagicMock(
+                passed=True, sanitized_input="全局预算分配"
+            )
+            mock_llm = MagicMock()
+            mock_llm.ainvoke = AsyncMock(return_value=mock_response)
+            mock_create_llm.return_value = mock_llm
+
+            result = await plan_node(
+                {
+                    "query": "全局预算分配",
+                    "scope": "budget",
+                    "budget": 500000.0,
+                    "org_id": "org-1",
+                    "user_id": "u-1",
+                    "status": AnalysisStatus.PENDING,
+                    "expert_results": [],
+                    "execution_errors": [],
+                }
+            )
+
+        assert "budget" in result["selected_experts"]
+        assert "prospect" in result["selected_experts"]
