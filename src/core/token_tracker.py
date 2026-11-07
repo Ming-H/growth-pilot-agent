@@ -27,7 +27,10 @@ class CostTracker:
         "gpt-4o": {"input": 2.50, "output": 10.00},
         "gpt-4o-mini": {"input": 0.15, "output": 0.60},
         "deepseek-chat": {"input": 0.14, "output": 0.28},
-        "glm-4.7": {"input": 0.000001, "output": 0.000002},
+        # Zhipu flagship GLM tier, approx list price (¥2/M in, ¥8/M out) —
+        # was 1e-6/2e-6, six orders of magnitude low ⇒ cost_usd ≈ 0 for the
+        # DEFAULT model. Re-check against the official pricing page.
+        "glm-4.7": {"input": 0.30, "output": 1.10},
     }
 
     def __init__(self) -> None:

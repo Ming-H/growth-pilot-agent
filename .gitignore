@@ -25,3 +25,8 @@ Thumbs.db
 
 # Ruff
 .ruff_cache/
+
+# runtime state (memory DBs, test artifacts) — never commit org data
+data/memory/
+*.db
+test.db
