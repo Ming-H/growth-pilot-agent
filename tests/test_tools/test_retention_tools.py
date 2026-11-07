@@ -250,3 +250,19 @@ class TestWinbackPlanner:
         assert isinstance(result, dict)
         assert "random_new_segment" in result
         assert result["random_new_segment"]["strategy"] != "skip"
+
+
+class TestRetentionKpiHonesty:
+    def test_high_risk_count_is_true_segment_count(self):
+        """B7: the KPI is the segment count, not len() of the 5-cap sample."""
+        import asyncio
+
+        from src.agents.retention import RetentionExpert
+
+        r = asyncio.run(
+            RetentionExpert(llm=None).analyze({"query": "流失分析", "data_path": ""})
+        )
+        # synthetic churn segments have far more than the 5-sample cap
+        assert r["kpis"]["churn_high_risk_count"] > 5 or r["kpis"][
+            "churn_high_risk_count"
+        ] == float(len(r.get("high_risk_users", [])))

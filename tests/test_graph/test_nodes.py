@@ -641,3 +641,39 @@ class TestPlanLLMWhitelist:
 
         assert "budget" in result["selected_experts"]
         assert "prospect" in result["selected_experts"]
+
+
+class TestRefineValidation:
+    """A5: refined expert results pass the same Pydantic validation as the
+    execute path (the L1 ledger write gate requires the _validated mark)."""
+
+    @pytest.mark.asyncio
+    async def test_refine_result_gets_validated(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.graph.nodes import refine_node
+
+        inst = MagicMock()
+        inst.run = AsyncMock(
+            return_value={"success": True, "kpis": {"churn_high_risk_ratio": 0.2}}
+        )
+        with patch("src.graph.nodes._create_expert", return_value=inst):
+            result = await refine_node(
+                {
+                    "query": "q",
+                    "scope": "retention",
+                    "budget": 1000.0,
+                    "org_id": "org1",
+                    "user_id": "u1",
+                    "selected_experts": ["retention"],
+                    "expert_results": [
+                        {"expert": "retention", "success": True, "quality_scores": {}}
+                    ],
+                    # quality below threshold → retention selected for refine
+                    "quality_scores": {"retention": {"overall": 0.2, "reasoning": "thin"}},
+                    "execution_errors": [],
+                }
+            )
+
+        refined = result["expert_results"][-1]
+        assert refined.get("_validated") is True

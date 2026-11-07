@@ -58,8 +58,14 @@ def _route_after_evaluate(state: AnalysisState) -> str:
         )
         return "refine"
 
-    if approval_required:
-        logger.info("[router] Routing to approval checkpoint")
+    # A2: route into approval ONLY when it will actually pause. The graph
+    # compiles with interrupt_before=["approval"] — routing there
+    # unconditionally pauses EVERY approval_required run, including
+    # low-budget ones the node would auto-approve (agent mode fixed this
+    # in v9; workflow mode never got the fix).
+    budget = state.get("budget") or 0
+    if approval_required and budget >= settings.budget_approval_threshold:
+        logger.info("[router] Routing to approval checkpoint (budget≥threshold)")
         return "approval"
 
     logger.info("[router] Routing to report generation")

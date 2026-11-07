@@ -93,9 +93,14 @@ async def kpi_gate_node(state: AnalysisState) -> dict[str, Any]:
                 content=gated_report,
                 structured={"kpis": kpi_snapshot},
             )
-        await store.close()
     except Exception as exc:
         logger.debug("[kpi_gate] memory write-back unavailable: %s", exc)
+    finally:
+        # A6: any exception above must not leak the aiosqlite connection.
+        try:
+            await store.close()
+        except Exception:
+            pass
 
     result = update.get("kpi_gate_result") or {}
     dur_ms = round((time.monotonic() - started) * 1000)

@@ -214,9 +214,14 @@ async def plan_node(state: AnalysisState) -> dict:  # noqa: D401
                 "[plan_node] Injected %d memory entr(ies) into planning context",
                 len(memory_context),
             )
-        await store.close()
     except Exception as exc:
         logger.debug("[plan_node] Memory retrieval unavailable: %s", exc)
+    finally:
+        # A6: close even when a search/alias call raised mid-block.
+        try:
+            await store.close()
+        except Exception:
+            pass
 
     memory_block = ""
     if memory_context:
@@ -597,6 +602,11 @@ async def refine_node(state: AnalysisState) -> dict:  # noqa: D401
             _, result = outcome  # type: ignore[misc]
             result["expert"] = expert_key
             result["refinement_attempt"] = True
+            # A5: same validation as the execute path — refined results
+            # enter expert_results/kpi_snapshot and are eligible for the
+            # L1 ledger; skipping _validate_expert_result bypassed the
+            # ledger's write gate (no _validated marker).
+            result = _validate_expert_result(expert_key, result)
             expert_results.append(result)
 
     # After refinement, mark needs_refinement as False to avoid infinite loop

@@ -317,7 +317,9 @@ class RetentionExpert(ExpertAgentBase):
             "kpis": {
                 "churn_high_risk_ratio": float(churn_risk.get("high_risk_ratio", 0) or 0),
                 "churn_model_auc": float(churn_risk.get("train_auc", 0) or 0),
-                "churn_high_risk_count": float(len(high_risk_users)) if high_risk_users else 0.0,
+                # B7: the segment's TRUE count — high_risk_users is a display
+                # sample hard-capped at 5, len() of it lied about the KPI.
+                "churn_high_risk_count": float(high_risk_info.get("count", 0) or 0),
             },
             "errors": errors,
         }

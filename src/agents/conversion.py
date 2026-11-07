@@ -185,6 +185,9 @@ class ConversionExpert(ExpertAgentBase):
             else 0
         )
         return {
+            # B10: the funnel feed is a built-in demo funnel (see
+            # _get_funnel_data) — same honesty marker as the ad expert.
+            "data_source": "synthetic",
             "reach_result": reach_result,
             "funnel_result": funnel_result,
             "slot_result": slot_result,

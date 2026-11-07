@@ -62,7 +62,7 @@ class TestRoutingLogic:
         assert _route_after_evaluate(state) == "refine"
 
     def test_evaluate_routes_to_approval_when_required(self):
-        """After evaluate, if approval required, route to approval."""
+        """After evaluate, approval required AND budget ≥ threshold → approval."""
         from src.graph.graph import _route_after_evaluate
 
         state: AnalysisState = {
@@ -72,8 +72,27 @@ class TestRoutingLogic:
             "needs_refinement": False,
             "refinement_round": 0,
             "approval_required": True,
+            "budget": 50_000.0,
         }  # type: ignore
         assert _route_after_evaluate(state) == "approval"
+
+    def test_evaluate_low_budget_auto_approves_to_report(self):
+        """A2: interrupt_before pauses ANY run routed into approval — a
+        low-budget approval_required run would hang forever on the node
+        that is supposed to auto-approve it. Route it to report instead
+        (the agent-mode fix, applied to workflow mode)."""
+        from src.graph.graph import _route_after_evaluate
+
+        state: AnalysisState = {
+            "query": "test",
+            "org_id": "org1",
+            "user_id": "user1",
+            "needs_refinement": False,
+            "refinement_round": 0,
+            "approval_required": True,
+            "budget": 500.0,  # < default threshold 10_000
+        }  # type: ignore
+        assert _route_after_evaluate(state) == "report"
 
     def test_evaluate_routes_to_report_when_done(self):
         """After evaluate, if no refinement and no approval, route to report."""
