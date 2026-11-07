@@ -80,16 +80,20 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Rate limiting (only if slowapi is available)
-    try:
-        from slowapi import Limiter, _rate_limit_exceeded_handler
-        from slowapi.errors import RateLimitExceeded
-        from slowapi.util import get_remote_address
+    # Rate limiting — one shared limiter, actually ENFORCED (C1: the
+    # middleware was never mounted before; decorators without middleware
+    # are dead config).
+    from src.web.rate_limit import HAS_SLOWAPI, limiter
 
-        limiter = Limiter(key_func=get_remote_address)
+    if HAS_SLOWAPI and limiter is not None:
+        from slowapi import _rate_limit_exceeded_handler
+        from slowapi.errors import RateLimitExceeded
+        from slowapi.middleware import SlowAPIMiddleware
+
         application.state.limiter = limiter
         application.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-    except ImportError:  # pragma: no cover
+        application.add_middleware(SlowAPIMiddleware)
+    else:  # pragma: no cover
         logger.info("slowapi not installed — rate limiting disabled")
 
     application.include_router(auth_router)

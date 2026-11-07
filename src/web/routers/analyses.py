@@ -40,20 +40,16 @@ from src.db.database import get_db, get_session_factory
 from src.db.models import Analysis, Organization, User
 from src.graph.workflow import run_workflow
 from src.web.deps import get_graph_for, thread_id_for
+from src.web.rate_limit import limit_or_pass
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["analyses"])
 
-# Rate limiting (graceful no-op when slowapi is missing)
-try:
-    from slowapi import Limiter
-    from slowapi.util import get_remote_address
-
-    limiter = Limiter(key_func=get_remote_address)
-    _limit_analyze = limiter.limit("10/minute")
-except ImportError:  # pragma: no cover
-    _limit_analyze = None
+# Rate limiting — shared limiter (C1: a local Limiter instance plus a
+# decorator that was never applied = dead config). slowapi requires the
+# Request parameter to be literally named ``request``, hence the rename.
+_limit_analyze = limit_or_pass("10/minute")
 
 
 class AnalysisError(Exception):
@@ -121,9 +117,10 @@ async def _enforce_quota(db: AsyncSession, user: User) -> Organization | None:
 
 
 @router.post("/analyze", response_model=AnalysisPersistedResponse)
+@_limit_analyze
 async def analyze(
-    http_request: Request,
-    request: AnalyzeRequest,
+    request: Request,
+    body: AnalyzeRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AnalysisPersistedResponse:
@@ -133,10 +130,10 @@ async def analyze(
     analysis = Analysis(
         user_id=user.id,
         org_id=user.org_id,
-        query=request.query,
-        scope=request.scope or "full",
-        budget=request.budget,
-        mode=request.mode or get_settings().orchestration_mode,
+        query=body.query,
+        scope=body.scope or "full",
+        budget=body.budget,
+        mode=body.mode or get_settings().orchestration_mode,
         status="running",
     )
     db.add(analysis)
@@ -148,22 +145,22 @@ async def analyze(
         user.id,
         user.org_id,
         analysis.mode,
-        request.query[:80],
+        body.query[:80],
     )
 
     start_time = time.monotonic()
     try:
         state = await run_workflow(
-            query=request.query,
-            data_path=request.data_path,
-            budget=request.budget,
-            scope=request.scope or "",
-            mode=request.mode,
+            query=body.query,
+            data_path=body.data_path,
+            budget=body.budget,
+            scope=body.scope or "",
+            mode=body.mode,
             org_id=user.org_id,
             user_id=user.id,
-            approval_required=request.approval_required,
+            approval_required=body.approval_required,
             thread_id=analysis.id,  # stable HITL thread
-            session_id=request.session_id,
+            session_id=body.session_id,
         )
     except Exception as exc:
         elapsed = time.monotonic() - start_time
@@ -205,9 +202,10 @@ async def analyze(
 
 
 @router.post("/analyze/stream")
+@_limit_analyze
 async def analyze_stream(
-    http_request: Request,
-    request: AnalyzeRequest,
+    request: Request,
+    body: AnalyzeRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> EventSourceResponse:
@@ -221,10 +219,10 @@ async def analyze_stream(
     analysis = Analysis(
         user_id=user.id,
         org_id=user.org_id,
-        query=request.query,
-        scope=request.scope or "full",
-        budget=request.budget,
-        mode=request.mode or get_settings().orchestration_mode,
+        query=body.query,
+        scope=body.scope or "full",
+        budget=body.budget,
+        mode=body.mode or get_settings().orchestration_mode,
         status="running",
     )
     db.add(analysis)
@@ -242,9 +240,9 @@ async def analyze_stream(
     async def event_generator():
         plan_event = AgentEvent(
             type="plan",
-            message="Analyzing your request...",
+            message="Analyzing your body...",
             progress=0.05,
-            data={"run_id": analysis_id, "query": request.query},
+            data={"run_id": analysis_id, "query": body.query},
         )
         yield _sse_event(plan_event)
         yield {
@@ -252,7 +250,7 @@ async def analyze_stream(
             "data": EventData(
                 event_type="started",
                 agent="orchestrator",
-                data={"run_id": analysis_id, "query": request.query},
+                data={"run_id": analysis_id, "query": body.query},
             ).model_dump_json(),
         }
 
@@ -284,16 +282,16 @@ async def analyze_stream(
 
         start_time = time.monotonic()
         settings = get_settings()
-        mode = request.mode or settings.orchestration_mode
+        mode = body.mode or settings.orchestration_mode
         compiled_graph = await get_graph_for(mode)
         initial_state = {
-            "query": request.query,
-            "scope": request.scope,
-            "budget": request.budget,
+            "query": body.query,
+            "scope": body.scope,
+            "budget": body.budget,
             "org_id": user.org_id,
             "user_id": user.id,
-            "session_id": request.session_id,
-            "approval_required": request.approval_required,
+            "session_id": body.session_id,
+            "approval_required": body.approval_required,
             "expert_results": [],
             "execution_errors": [],
             "messages": [],
@@ -328,8 +326,8 @@ async def analyze_stream(
             # graph state keys.
             from src.graph.workflow import _build_compat_result
 
-            compat = _build_compat_result(state, query=request.query, scope=request.scope or "")
-            response = _compat_to_response(compat, request)
+            compat = _build_compat_result(state, query=body.query, scope=body.scope or "")
+            response = _compat_to_response(compat, body)
             yield _sse_event(
                 AgentEvent(
                     type="complete",
