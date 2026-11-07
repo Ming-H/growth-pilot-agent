@@ -85,7 +85,7 @@ Pure regex + arithmetic. Extracts numeric claims near KPI-lexicon words; each mu
 
 ### Experts & tools
 
-5 experts (`src/agents/*`) subclass `ExpertAgentBase`: `_execute_pipeline` (deterministic, threadpool_limits(1)-wrapped) + `_build_synthesis_prompt`. `llm=None` → deterministic `k=v` summary with `degraded` marker — **absence of a brain is a mode, not a failure** (success stays True). ad expert honestly marks `data_source: "synthetic"` (ignores data_path). Import guards catch `(ImportError, OSError)` — broken native libs degrade, never crash the router.
+6 experts (`src/agents/*`) subclass `ExpertAgentBase` (budget = the cross-channel orchestration layer: concave response curves + IP allocation; `_run_expert_tool` injects `context_kpis` from `kpi_snapshot` so it can calibrate on sibling experts' KPIs): `_execute_pipeline` (deterministic, threadpool_limits(1)-wrapped) + `_build_synthesis_prompt`. `llm=None` → deterministic `k=v` summary with `degraded` marker — **absence of a brain is a mode, not a failure** (success stays True). ad expert honestly marks `data_source: "synthetic"` (ignores data_path). Import guards catch `(ImportError, OSError)` — broken native libs degrade, never crash the router.
 
 Agent tool specs (`src/agent/tools.py`) are ACI-style: purpose/when-to-call/args/**failure-modes**.
 
