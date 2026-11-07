@@ -147,3 +147,53 @@ class TestBudgetResultModel:
         out = _validate_expert_result("budget", result)
         assert out["_validated"] is True
         assert out["agent_name"] == "budget"
+
+
+class TestBudgetExpert:
+    """Pipeline integration: params → allocation + KPIs, zero-key deterministic."""
+
+    async def _run(self, budget: float = 200_000.0, context_kpis: dict | None = None):
+        from src.agents.budget import BudgetExpert
+
+        return await BudgetExpert(llm=None).analyze(
+            {"budget": budget, "query": "全局预算分配", "context_kpis": context_kpis or {}}
+        )
+
+    @pytest.mark.asyncio
+    async def test_pipeline_success_and_kpis(self):
+        r = await self._run()
+        assert r["success"] is True
+        assert set(r["allocation"]) == {"ad", "subsidy", "retention", "conversion"}
+        assert r["kpis"]["budget_total"] == 200_000.0
+        assert r["kpis"]["expected_roi"] > 0
+        # gate-verifiable numbers only (floats) in kpis
+        assert all(isinstance(v, float) for v in r["kpis"].values())
+
+    @pytest.mark.asyncio
+    async def test_missing_budget_fails_honestly(self):
+        r = await self._run(budget=0)
+        assert r["success"] is False
+        assert r["errors"]
+
+    @pytest.mark.asyncio
+    async def test_context_kpis_change_allocation(self):
+        """Calibrated curves (subsidy ROI x2) must not shrink subsidy's share."""
+        base = await self._run()
+        cal = await self._run(context_kpis={"subsidy_expected_roi": 3.2})
+        assert cal["data_source"] == "calibrated"
+        assert cal["allocation"]["subsidy"] >= base["allocation"]["subsidy"]
+
+    def test_can_handle_keywords(self):
+        from src.agents.budget import BudgetExpert
+
+        assert BudgetExpert.can_handle("跨渠道预算怎么分配") >= 0.5
+        assert BudgetExpert.can_handle("预算在投放和补贴之间怎么分") >= 0.5
+        # must NOT poach plain subsidy-budget queries
+        assert BudgetExpert.can_handle("补贴预算优化") < 0.5
+        assert BudgetExpert.can_handle("优惠券设计") == 0.0
+
+    @pytest.mark.asyncio
+    async def test_zero_key_byte_deterministic(self):
+        a, b = await self._run(), await self._run()
+        assert a["kpis"] == b["kpis"]
+        assert a["allocation"] == b["allocation"]

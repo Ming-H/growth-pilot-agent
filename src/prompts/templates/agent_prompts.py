@@ -558,3 +558,91 @@ class AdPrompt(PromptTemplate):
     @property
     def business_context(self) -> str:
         return PromptTemplate.business_context()
+
+
+# =====================================================================
+# Budget (global orchestration)
+# =====================================================================
+
+
+class BudgetPrompt(PromptTemplate):
+    """Budget agent prompt — global cross-channel budget orchestration."""
+
+    DEFAULT_CONTEXT: dict[str, Any] = {
+        "user_query": "",
+        "season": "当前",
+        "kpi_baseline": {},
+        "memory_context": {},
+        "total_budget": "",
+        "allocation_summary": "",
+        "channel_details": {},
+        "solver_method": "",
+        "data_source": "",
+    }
+
+    TEMPLATE = """\
+{{ role_definition }}
+
+## 业务背景
+{{ business_context }}
+预算是所有增长动作的硬约束。五个领域专家各自回答"我这个渠道怎么做好"，
+你回答的是更上层的问题："总预算在渠道之间怎么流动才最优"。
+核心事实：每个渠道的边际收益都在递减（饱和响应曲线）——把钱全押给
+单渠道的局部最优，远劣于跨渠道的全局最优。
+
+{% if memory_context %}## 历史记忆
+{{ memory_context | tojson }}
+{% endif %}
+
+## 全局预算分配结果
+
+{% if total_budget %}- 总预算: {{ total_budget }}{% endif %}
+{% if solver_method %}- 求解方法: {{ solver_method }}（整数规划 / 精确枚举）{% endif %}
+{% if data_source %}- 数据口径: {{ data_source }}（默认曲线 / 兄弟专家KPI校准）{% endif %}
+{% if allocation_summary %}- 分配方案: {{ allocation_summary }}{% endif %}
+
+## 推理步骤
+请基于以上数据，按以下步骤推理：
+
+<analysis>
+1. 解读各渠道的边际收益曲线差异（谁的起点高、谁饱和得快）
+2. 解释最优切分为什么是全局的（把任一渠道的预算挪给另一渠道会损失多少）
+3. 检查未被分配的余量（unallocated）意味着什么（所有渠道已到收益上限档位）
+4. 基于校准来源评估置信度（default_curves 需要更强的人工复核）
+</analysis>
+
+<strategy>
+1. 按分配方案执行，并给出各渠道的落地优先级
+2. 指出边际收益最接近的渠道组合（下一步实验的 AB 候选）
+3. 建议校准路径：先跑哪些域内专家来替换默认曲线
+4. 风险提示：曲线假设的局限（竞争响应、季节性、创意库存）
+</strategy>
+
+## 输出格式
+<output>
+{
+  "summary": "全局分配总体概述",
+  "allocation_rationale": "为什么这是最优切分",
+  "channel_priorities": "各渠道落地优先级",
+  "calibration_plan": "校准与实验建议",
+  "risk_notes": "曲线假设的局限与风险"
+}
+</output>
+"""
+
+    @property
+    def role_definition(self) -> str:
+        return PromptTemplate.role_definition(
+            "预算统筹专家 Agent",
+            [
+                "跨渠道预算分配（投放/补贴/召回/券）",
+                "饱和响应曲线建模（边际收益递减）",
+                "整数规划全局最优求解（HiGHS）",
+                "兄弟专家 KPI 校准曲线",
+                "预算 ROI 与未分配余量解读",
+            ],
+        )
+
+    @property
+    def business_context(self) -> str:
+        return PromptTemplate.business_context()
