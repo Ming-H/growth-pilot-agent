@@ -341,6 +341,10 @@ class SubsidyExpert(ExpertAgentBase):
             "expected_roi": expected_roi,
             "allocation_plan": allocation_result,
             "kpis": {
+                # prefixed canonical key (cross-expert references like the
+                # budget calibration use it); bare expected_roi kept for
+                # report-template compatibility.
+                "subsidy_expected_roi": float(expected_roi or 0),
                 "expected_roi": float(expected_roi or 0),
                 "subsidy_ate": float(ate_result.get("ate", 0) or 0)
                 if isinstance(ate_result, dict)

@@ -165,7 +165,7 @@ class TestBudgetExpert:
         assert r["success"] is True
         assert set(r["allocation"]) == {"ad", "subsidy", "retention", "conversion"}
         assert r["kpis"]["budget_total"] == 200_000.0
-        assert r["kpis"]["expected_roi"] > 0
+        assert r["kpis"]["budget_expected_roi"] > 0
         # gate-verifiable numbers only (floats) in kpis
         assert all(isinstance(v, float) for v in r["kpis"].values())
 
@@ -197,3 +197,32 @@ class TestBudgetExpert:
         a, b = await self._run(), await self._run()
         assert a["kpis"] == b["kpis"]
         assert a["allocation"] == b["allocation"]
+
+
+class TestCalibrationContract:
+    """Every CALIBRATION_RULES anchor key must be a KPI its anchoring
+    expert actually emits (v9.1 shipped three dead rules — this test
+    would have caught them). Channel -> anchoring expert."""
+
+    ANCHOR_EXPERTS = {"subsidy": "subsidy"}
+
+    @pytest.mark.asyncio
+    async def test_rule_keys_match_expert_output(self):
+        from importlib import import_module
+
+        from src.tools.budget.response_curves import CALIBRATION_RULES
+
+        for channel, rule in CALIBRATION_RULES.items():
+            expert_key = self.ANCHOR_EXPERTS[channel]
+            mod = import_module(f"src.agents.{expert_key}")
+            cls = getattr(mod, f"{expert_key.capitalize()}Expert")
+            result = await cls(llm=None).analyze(
+                {"query": "分析", "budget": 100_000, "data_path": ""}
+            )
+            emitted = set((result.get("kpis") or {}).keys())
+            assert emitted, f"{expert_key} produced no kpis at all"
+            missing = [k for k in rule["kpi_keys"] if k not in emitted]
+            assert not missing, (
+                f"calibration rule for '{channel}' references {missing} "
+                f"which {expert_key} never emits (actual: {sorted(emitted)})"
+            )

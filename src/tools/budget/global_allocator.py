@@ -4,7 +4,7 @@ Maximise total expected incremental GMV subject to the total budget and
 per-channel caps, over the discrete (spend, gmv) grids produced by
 ``ChannelResponseModel``. Primary solver: PuLP + HiGHS MIP (single-
 selection formulation). Fallback: exhaustive enumeration — exact at this
-scale (4 channels x 11 levels = 12^4 combinations) and dependency-free,
+scale (4 channels x 11 levels each = 11^4 = 14641 combinations) and dependency-free,
 so the allocator degrades in *method*, never in *correctness*.
 """
 

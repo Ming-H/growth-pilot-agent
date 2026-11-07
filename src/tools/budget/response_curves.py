@@ -29,14 +29,21 @@ CHANNEL_DEFAULTS: dict[str, dict[str, float]] = {
     "conversion": {"scale": 200_000.0, "k": 60_000.0, "max_share": 0.40, "max_abs": 200_000.0},
 }
 
-# First-order calibration: anchor each channel's scale to an ROI KPI a
+# First-order calibration: anchor a channel's scale to an ROI KPI a
 # sibling expert may already have produced in this run. The multiplier
 # is clamped — calibration is anchoring, not curve re-fitting.
+#
+# ANCHOR CONTRACT: every kpi_key here must be a key the anchoring expert
+# actually emits in its ``kpis`` dict (see tests/test_tools/test_budget_tools.py
+# ::TestCalibrationContract — it runs the expert and asserts the match).
+# v9.1 shipped speculative keys for ad/retention/conversion that never
+# matched (dead config, data_source stuck at default_curves); they were
+# removed. Re-add a channel only together with its contract test.
+#   ad        emits: ad_target_cpa / ad_win_rate / ad_impressions (no ROI yet)
+#   retention emits: churn_high_risk_ratio / churn_model_auc (no ROI yet)
+#   conversion emits: conversion_rate / funnel_bottleneck_rate (no ROI yet)
 CALIBRATION_RULES: dict[str, dict[str, Any]] = {
-    "ad": {"kpi_keys": ["ad_expected_roi", "ad_roi"], "reference_roi": 2.0},
     "subsidy": {"kpi_keys": ["subsidy_expected_roi", "expected_roi"], "reference_roi": 1.6},
-    "retention": {"kpi_keys": ["retention_expected_roi", "winback_roi"], "reference_roi": 1.8},
-    "conversion": {"kpi_keys": ["conversion_expected_roi", "coupon_roi"], "reference_roi": 2.2},
 }
 
 _CALIBRATION_BOUNDS = (0.5, 2.0)
@@ -102,7 +109,9 @@ class ChannelResponseModel:
     # ------------------------------------------------------------------
 
     def _calibration_multiplier(self, channel: str) -> float:
-        rule = CALIBRATION_RULES[channel]
+        rule = CALIBRATION_RULES.get(channel)
+        if rule is None:  # no anchor KPI for this channel (yet) — default curve
+            return 1.0
         observed = None
         for key in rule["kpi_keys"]:
             v = _as_float(self.context_kpis.get(key))

@@ -106,7 +106,9 @@ class BudgetExpert(ExpertAgentBase):
         kpis: dict[str, float] = {
             "budget_total": float(budget),
             "expected_incremental_gmv": float(plan["expected_incremental_gmv"]),
-            "expected_roi": float(plan["expected_roi"]),
+            # prefixed: the unprefixed "expected_roi" collides with the
+            # subsidy expert's (orders/yuan vs GMV/yuan) in kpi_snapshot
+            "budget_expected_roi": float(plan["expected_roi"]),
         }
         for channel, spend in allocation.items():
             kpis[f"alloc_{channel}"] = float(spend)
