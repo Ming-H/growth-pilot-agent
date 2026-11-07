@@ -55,10 +55,11 @@ class BidOptimizer:
         if current_bid < 0:
             return 0.0
 
-        # Theoretical bid: if we pay this per click, we expect target_cpa per conversion
-        # bid_per_click = target_cpa * cvr  (inverse: bid = target_cpa * cvr)
-        # But the requirement says: bid = base_bid * cvr / target_cpa
-        formulaic_bid = current_bid * cvr / target_cpa
+        # eCPC: pay-per-click such that expected cost per conversion hits
+        # target — bid_per_click = target_cpa * cvr. (A10: an earlier
+        # current_bid*cvr/target_cpa was dimensionally wrong — ~1e-3 CNY
+        # noise for typical inputs — and survived only via the 0.01 clamp.)
+        formulaic_bid = target_cpa * cvr
 
         # Blend with current bid for smooth transitions
         new_bid = alpha * formulaic_bid + (1 - alpha) * current_bid

@@ -176,8 +176,12 @@ class ExpertAgentBase(BaseAgent):
             results["degraded"] = degraded
 
         # Explicit success contract: downstream nodes (evaluate/refine/report)
-        # check this flag instead of relying on key absence.
-        results["success"] = not errors
+        # check this flag instead of relying on key absence. A12: pipeline-
+        # local tool failures (collected into results["errors"] via
+        # _safe_execute) must flip success too — "every tool failed" is not
+        # a successful analysis. Degradation (llm=None marker) is a mode and
+        # deliberately does NOT flip it.
+        results["success"] = not errors and not results.get("errors")
 
         return results
 

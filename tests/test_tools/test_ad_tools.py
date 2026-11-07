@@ -140,9 +140,16 @@ class TestBidOptimizer:
         bid = optimizer.ecpc_bid(current_bid=-1.0, cvr=0.05, target_cpa=50.0)
         assert bid == 0.0
 
+    def test_ecpc_bid_formula(self, optimizer):
+        """eCPC: bid_per_click = target_cpa * cvr (pay-per-click such that
+        expected cost per conversion hits target). alpha=1 → pure formula.
+        A10: the old formula current_bid*cvr/target_cpa yielded 0.0025 —
+        dimensionally noise."""
+        bid = optimizer.ecpc_bid(current_bid=2.0, cvr=0.05, target_cpa=40.0, alpha=1.0)
+        assert bid == 2.0  # 40.0 * 0.05
+
     def test_ecpc_bid_reasonable_range(self, optimizer):
         bid = optimizer.ecpc_bid(current_bid=2.0, cvr=0.05, target_cpa=40.0, alpha=1.0)
-        # bid should be formulaic: 2.0 * 0.05 / 40.0 = 0.0025, clamped to 0.01
         assert bid >= 0.01
 
     def test_pid_controller_returns_float(self, optimizer):

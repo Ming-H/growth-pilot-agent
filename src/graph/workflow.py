@@ -26,12 +26,18 @@ logger = logging.getLogger(__name__)
 
 
 def _is_success(result_state: dict[str, Any]) -> bool:
-    """Determine if the analysis completed successfully."""
+    """Success only when the graph actually reached COMPLETED.
+
+    A11: ``!= "failed"`` also reported paused (awaiting_approval) and
+    rejected runs as success=True with an empty report — breaking the
+    ``--json`` honest-exit-code contract. Pause/reject are honest
+    non-successes, not errors; ``status`` is surfaced separately.
+    """
     status = result_state.get("status")
     if status is None:
         return False
     status_str = status.value if hasattr(status, "value") else str(status)
-    return status_str != "failed"
+    return status_str == "completed"
 
 
 def _build_compat_result(
@@ -55,8 +61,11 @@ def _build_compat_result(
         if isinstance(expert_kpis, dict):
             kpi_snapshot.update(expert_kpis)
 
+    status = result_state.get("status")
+    status_str = status.value if hasattr(status, "value") else str(status or "")
     return {
         "success": _is_success(result_state),
+        "status": status_str,
         "query": query,
         "scope": scope or "full",
         "analysis_summary": final_report,

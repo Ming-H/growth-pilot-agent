@@ -126,3 +126,43 @@ class TestRoutingLogic:
             "approved": False,
         }  # type: ignore
         assert _route_after_approval(state) == "__end__"
+
+
+class TestCompatSuccess:
+    """A11: paused/rejected runs must NOT report success=True — the
+    --json honest-exit-code contract depends on it."""
+
+    def _compat(self, state: dict) -> dict:
+        from src.graph.workflow import _build_compat_result
+
+        return _build_compat_result(state, query="q", scope="full")
+
+    def test_completed_is_success(self):
+        from src.graph.state import AnalysisStatus
+
+        r = self._compat({"status": AnalysisStatus.COMPLETED, "final_report": "R"})
+        assert r["success"] is True
+        assert r["status"] == "completed"
+
+    def test_awaiting_approval_is_not_success(self):
+        """HITL pause: ainvoke returns early with an empty report."""
+        from src.graph.state import AnalysisStatus
+
+        r = self._compat({"status": AnalysisStatus.AWAITING_APPROVAL, "final_report": ""})
+        assert r["success"] is False
+        assert r["status"] == "awaiting_approval"
+
+    def test_rejected_is_not_success(self):
+        """User rejected at the approval node: status stays awaiting_approval."""
+        from src.graph.state import AnalysisStatus
+
+        r = self._compat(
+            {"status": AnalysisStatus.AWAITING_APPROVAL, "approved": False, "final_report": ""}
+        )
+        assert r["success"] is False
+
+    def test_failed_is_not_success(self):
+        from src.graph.state import AnalysisStatus
+
+        r = self._compat({"status": AnalysisStatus.FAILED})
+        assert r["success"] is False

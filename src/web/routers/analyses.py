@@ -177,8 +177,15 @@ async def analyze(
 
     elapsed = time.monotonic() - start_time
 
-    # Persist from the compat contract (A5: cost lives in metadata)
-    analysis.status = "completed"
+    # Persist from the compat contract (A5: cost lives in metadata).
+    # A11: paused (awaiting_approval) / rejected runs are NOT "completed" —
+    # previously every run was marked completed, even with an empty report.
+    compat_status = state.get("status", "")
+    analysis.status = (
+        "completed"
+        if state.get("success")
+        else ("awaiting_approval" if compat_status == "awaiting_approval" else "failed")
+    )
     analysis.result = state
     analysis.kpi_snapshot = state.get("kpi_snapshot")
     analysis.strategy_recommendation = state.get("strategy_recommendation", "")
