@@ -22,6 +22,12 @@ class TestExtractClaims:
         report = "会议安排在 3 月 15 日，共 7 项议程"
         assert extract_claims(report) == []
 
+    def test_query_echo_line_not_audited(self):
+        """The report header quoting the user's query verbatim is not a
+        KPI assertion by the system — its numbers must not be claims."""
+        report = "- **查询**: 50万预算在投放和补贴之间怎么分配"
+        assert extract_claims(report) == []
+
     def test_plain_ratio_matches_snapshot(self):
         report = "转化率为 0.08 的基线"
         claims = extract_claims(report)

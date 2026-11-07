@@ -186,6 +186,25 @@ _BUILTIN_SAMPLES: list[dict[str, Any]] = [
         "agent_name": "orchestrator",
         "metadata": {"difficulty": "hard", "tags": ["全链路分析", "策略综合"]},
     },
+    # --- Budget (global orchestration) ---
+    {
+        "id": "budget_001",
+        "input_query": "下季度 50 万预算，在投放、补贴、召回之间怎么分配？",
+        "scope": "budget",
+        "expected_keys": ["allocation", "channel_details", "expected_roi", "analysis"],
+        "reference_answer": "应包含四渠道预算切分、各渠道预期增量GMV与ROI、总期望ROI、以及边际收益递减下的分配理由。",
+        "agent_name": "budget",
+        "metadata": {"difficulty": "medium", "tags": ["预算分配", "整数规划", "marketing mix"]},
+    },
+    {
+        "id": "budget_002",
+        "input_query": "全局预算统筹：补贴和投放哪个边际收益更高",
+        "scope": "budget",
+        "expected_keys": ["allocation", "expected_roi", "solver_method"],
+        "reference_answer": "应包含各渠道边际收益对比、预算切分方案、求解方法与数据口径标注。",
+        "agent_name": "budget",
+        "metadata": {"difficulty": "easy", "tags": ["边际收益", "跨渠道"]},
+    },
 ]
 
 

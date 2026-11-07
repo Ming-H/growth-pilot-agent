@@ -57,6 +57,12 @@ _LINE_CLAIM_RE = re.compile(
 
 _FRACTION_RE = re.compile(r"\d+(?:\.\d+)?\s*/\s*\d+(?:\.\d+)?")  # dates/ratios like 2024/10
 
+# Report-header lines quoting the user's query verbatim (deterministic
+# template / reconciliation appendix both echo it). The quoted text is
+# the *user's* wording, not a KPI assertion by the system — numbers in
+# it (e.g. "50万预算...") must not be audited as claims.
+_QUERY_ECHO_RE = re.compile(r"\*\*(查询|Query|分析范围)\*\*")
+
 
 def _parse_number(raw: str) -> float | None:
     try:
@@ -79,6 +85,9 @@ def extract_claims(report: str) -> list[dict[str, Any]]:
     for line_no, line in enumerate(report.splitlines(), 1):
         stripped = line.strip()
         if not stripped or stripped.startswith("|") and "---" in stripped:
+            continue
+        # verbatim user-query echo in the header — not a system assertion
+        if _QUERY_ECHO_RE.search(stripped):
             continue
         # Skip pure table separators and headings
         if re.fullmatch(r"[-|: ]+", stripped):
