@@ -147,8 +147,13 @@ class TestBudgetToolSpec:
         fake.run = AsyncMock(side_effect=_capture_run)
         monkeypatch.setattr("src.graph.nodes._create_expert", lambda key: fake)
 
+        state = {
+            "query": "全局预算分配",
+            "budget": 100_000,
+            "kpi_snapshot": {"subsidy_expected_roi": 2.0},
+        }
         digest = await agent_tools.execute_tool_call_async(
-            {"query": "全局预算分配", "budget": 100_000, "kpi_snapshot": {"subsidy_expected_roi": 2.0}},
+            state,
             "run_budget_analysis",
             {"query": "全局预算分配", "budget": 100_000},
         )
