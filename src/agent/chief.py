@@ -444,14 +444,15 @@ async def agent_tools_node(state: AgentState) -> dict:
     if subgoal_updates:
         update["subgoals"] = subgoal_updates
     # KPI snapshot refresh (ground truth for the gate).
+    from src.graph.nodes import _merge_kpis
+
     snapshot: dict[str, Any] = {}
     for r in expert_results:
         k = r.get("kpis")
         if isinstance(k, dict):
-            snapshot.update(k)
+            _merge_kpis(snapshot, k, r.get("expert", "unknown"))
     if snapshot:
-        merged = dict(state.get("kpi_snapshot") or {})
-        merged.update(snapshot)
+        merged = _merge_kpis(dict(state.get("kpi_snapshot") or {}), snapshot, "tools_node")
         update["kpi_snapshot"] = merged
     dur_ms = round((_time.monotonic() - started) * 1000)
     update["agent_steps"] = [

@@ -266,3 +266,34 @@ class TestRetentionKpiHonesty:
         assert r["kpis"]["churn_high_risk_count"] > 5 or r["kpis"][
             "churn_high_risk_count"
         ] == float(len(r.get("high_risk_users", [])))
+
+
+class TestCohortDenominator:
+    """B8: cohort denominator = all cohort members; users whose only order
+    falls OUTSIDE the observation window must still count in the size
+    (they are cohort members who did not retain in-window), not vanish."""
+
+    def test_out_of_window_user_keeps_denominator_honest(self):
+        import pandas as pd
+
+        from src.tools.retention.cohort_analyzer import CohortAnalyzer
+
+        rows = []
+        # user_a: active at offset 0 (retained)
+        # user_b: ONLY order is at offset 400 (outside a 365-day window)
+        for uid, day in [("user_a", 0), ("user_a", 10), ("user_b", 400)]:
+            rows.append(
+                {
+                    "user_id": uid,
+                    "signup_date": pd.Timestamp("2026-01-01"),
+                    "order_date": pd.Timestamp("2026-01-01") + pd.Timedelta(days=day),
+                }
+            )
+        analyzer = CohortAnalyzer(observation_window=365)
+        matrix = analyzer.analyze_retention_cohort(
+            pd.DataFrame(rows), cohort_dim="signup_date", period="D"
+        )
+        col0 = matrix.get(0)
+        # denominator includes BOTH users → day-0 retention is 1/2, not 1/1
+        assert col0 is not None
+        assert abs(float(col0.iloc[0]) - 0.5) < 1e-9

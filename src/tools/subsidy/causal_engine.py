@@ -246,19 +246,23 @@ class CausalInferenceEngine:
 
         simulated_ates: list[float] = []
 
+        # B9: seeded RNG — the rest of the codebase pins seed=42 for the
+        # byte-identical determinism invariant; unseeded globals broke it
+        # the moment this (currently dormant) method got called.
+        rng = np.random.RandomState(42)
         for _ in range(n_simulations):
             data_sim = data.copy()
 
             if method == "random_common_cause":
                 # Add a random variable as confounder and re-estimate
-                data_sim["_random_confounder"] = np.random.randn(len(data_sim))
+                data_sim["_random_confounder"] = rng.randn(len(data_sim))
                 sim_confounders = confounders + ["_random_confounder"]
                 result = self.estimate_ate(
                     data_sim, treatment, outcome, sim_confounders, method="backdoor"
                 )
             elif method == "placebo_treatment":
                 # Replace treatment with random assignment
-                data_sim["_placebo_treatment"] = np.random.binomial(1, 0.5, size=len(data_sim))
+                data_sim["_placebo_treatment"] = rng.binomial(1, 0.5, size=len(data_sim))
                 result = self.estimate_ate(
                     data_sim, "_placebo_treatment", outcome, confounders, method="backdoor"
                 )

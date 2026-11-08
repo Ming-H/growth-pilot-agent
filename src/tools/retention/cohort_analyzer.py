@@ -120,7 +120,15 @@ class CohortAnalyzer:
         else:
             df["period_offset"] = (df["order_date"] - df["cohort_date"]).dt.days // 7
 
-        # Clip to observation window
+        # Cohort sizes — computed BEFORE the window clip (B8): the
+        # denominator is every member of the cohort; users whose only
+        # order falls outside the observation window still belong to the
+        # cohort. Clipping first shrank the denominator and systematically
+        # inflated retention rates.
+        cohort_sizes = df.groupby("cohort_period")["user_id"].nunique().reset_index()
+        cohort_sizes.columns = ["cohort_period", "cohort_size"]
+
+        # Clip to observation window (numerator side only)
         max_offset_days = self.observation_window
         if period == "D":
             df = df[df["period_offset"] <= max_offset_days]
@@ -130,10 +138,6 @@ class CohortAnalyzer:
             df = df[df["period_offset"] <= max_offset_days // 30]
 
         df["period_offset"] = df["period_offset"].astype(int)
-
-        # Cohort sizes
-        cohort_sizes = df.groupby("cohort_period")["user_id"].nunique().reset_index()
-        cohort_sizes.columns = ["cohort_period", "cohort_size"]
 
         # Retained users per (cohort, offset)
         retained = df.groupby(["cohort_period", "period_offset"])["user_id"].nunique().reset_index()

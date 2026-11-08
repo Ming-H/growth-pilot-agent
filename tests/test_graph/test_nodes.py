@@ -677,3 +677,58 @@ class TestRefineValidation:
 
         refined = result["expert_results"][-1]
         assert refined.get("_validated") is True
+
+
+class TestRefineParamsParity:
+    """A4: refine must send the SAME params as execute (data_path/memory_context)."""
+
+    @pytest.mark.asyncio
+    async def test_refine_carries_data_path_and_memory(self):
+        from src.graph.nodes import refine_node
+
+        captured = {}
+
+        class _Cap:
+            async def run(self, state):
+                captured.update(state["params"])
+                return {"success": True, "kpis": {"a": 1.0}}
+
+        with patch("src.graph.nodes._create_expert", return_value=_Cap()):
+            await refine_node(
+                {
+                    "query": "q",
+                    "scope": "prospect",
+                    "budget": 1000.0,
+                    "data_path": "/tmp/custom.parquet",
+                    "memory_context": [{"query": "prior", "summary": "s"}],
+                    "quality_scores": {"prospect": {"overall": 0.1}},
+                    "expert_results": [],
+                    "execution_errors": [],
+                }
+            )
+
+        assert captured["data_path"] == "/tmp/custom.parquet"
+        assert captured["memory_context"] == [{"query": "prior", "summary": "s"}]
+
+
+class TestMergeKpisCollisionWarning:
+    """A9: cross-expert key collisions must be visible, not silent."""
+
+    def test_collision_warns(self, caplog):
+        import logging
+
+        from src.graph.nodes import _merge_kpis
+
+        with caplog.at_level(logging.WARNING):
+            merged = _merge_kpis({"roi": 1.5}, {"roi": 2.5}, "other_expert")
+        assert merged["roi"] == 2.5
+        assert any("collision" in r.message for r in caplog.records)
+
+    def test_same_value_no_warn(self, caplog):
+        import logging
+
+        from src.graph.nodes import _merge_kpis
+
+        with caplog.at_level(logging.WARNING):
+            _merge_kpis({"roi": 1.5}, {"roi": 1.5}, "other_expert")
+        assert not caplog.records

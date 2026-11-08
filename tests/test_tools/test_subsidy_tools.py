@@ -322,3 +322,50 @@ class TestSubsidyAllocator:
         # Should have segment details or summary
         assert isinstance(result, dict)
         assert result  # not empty
+
+
+class TestRefutationDeterminism:
+    """B9: refutation_test must be seeded — same input, same output, twice."""
+
+    def _make_data(self):
+        import numpy as np
+        import pandas as pd
+
+        rng = np.random.RandomState(0)
+        n = 200
+        x = rng.randn(n)
+        t = (rng.rand(n) > 0.5).astype(int)
+        y = 1.0 * t + 0.5 * x + rng.randn(n) * 0.1
+        return pd.DataFrame({"t": t, "x": x, "y": y})
+
+    def test_random_common_cause_reproducible(self):
+        from src.tools.subsidy.causal_engine import CausalInferenceEngine
+
+        engine = CausalInferenceEngine()
+        data = self._make_data()
+        est = engine.estimate_ate(data, treatment="t", outcome="y", confounders=["x"])
+        r1 = engine.refutation_test(
+            est, data, treatment="t", outcome="y", confounders=["x"],
+            method="random_common_cause", n_simulations=3,
+        )
+        r2 = engine.refutation_test(
+            est, data, treatment="t", outcome="y", confounders=["x"],
+            method="random_common_cause", n_simulations=3,
+        )
+        assert r1.get("new_effect") == r2.get("new_effect")
+
+    def test_placebo_reproducible(self):
+        from src.tools.subsidy.causal_engine import CausalInferenceEngine
+
+        engine = CausalInferenceEngine()
+        data = self._make_data()
+        est = engine.estimate_ate(data, treatment="t", outcome="y", confounders=["x"])
+        r1 = engine.refutation_test(
+            est, data, treatment="t", outcome="y", confounders=["x"],
+            method="placebo_treatment", n_simulations=3,
+        )
+        r2 = engine.refutation_test(
+            est, data, treatment="t", outcome="y", confounders=["x"],
+            method="placebo_treatment", n_simulations=3,
+        )
+        assert r1.get("new_effect") == r2.get("new_effect")

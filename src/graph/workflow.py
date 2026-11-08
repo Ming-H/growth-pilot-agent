@@ -54,12 +54,18 @@ def _build_compat_result(
     final_report = result_state.get("final_report", "")
     execution_errors: list[str] = result_state.get("execution_errors", [])
 
-    # Merge each expert's standardised `kpis` dict into the snapshot
-    kpi_snapshot: dict[str, Any] = {}
-    for r in expert_results_list:
-        expert_kpis = r.get("kpis", {})
-        if isinstance(expert_kpis, dict):
-            kpi_snapshot.update(expert_kpis)
+    # A8: pass through the snapshot the report/kpi_gate actually used —
+    # recomputing it here produced a SECOND "ground truth" that could
+    # diverge (budget setdefault, tools-node merges, gate bookkeeping).
+    # Fallback recompute only when the state never built one.
+    kpi_snapshot: dict[str, Any] = dict(result_state.get("kpi_snapshot") or {})
+    if not kpi_snapshot:
+        from src.graph.nodes import _merge_kpis
+
+        for r in expert_results_list:
+            expert_kpis = r.get("kpis", {})
+            if isinstance(expert_kpis, dict):
+                _merge_kpis(kpi_snapshot, expert_kpis, r.get("expert", "unknown"))
 
     status = result_state.get("status")
     status_str = status.value if hasattr(status, "value") else str(status or "")

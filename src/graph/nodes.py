@@ -25,6 +25,32 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def _merge_kpis(base: dict[str, Any], incoming: dict[str, Any], expert: str) -> dict[str, Any]:
+    """Merge an expert's KPIs into the snapshot, WARNING on key collisions.
+
+    A9: ``dict.update`` silently overwrites — two experts emitting the same
+    key with different semantics (e.g. roi orders/yuan vs GMV/yuan) lost
+    one value with no trace. Cross-expert keys SHOULD be prefixed
+    (subsidy_expected_roi / budget_expected_roi); this warning catches
+    any that slip through.
+    """
+    for key, value in incoming.items():
+        old = base.get(key)
+        if (
+            old is not None
+            and isinstance(old, (int, float))
+            and isinstance(value, (int, float))
+            and abs(float(old) - float(value)) > 1e-9
+        ):
+            logger.warning(
+                "[kpi_snapshot] collision: '%s' from '%s' overwrites %s with %s "
+                "(prefix cross-expert KPIs to avoid this)",
+                key, expert, old, value,
+            )
+        base[key] = value
+    return base
+
+
 def _validate_expert_result(expert_key: str, result: dict[str, Any]) -> dict[str, Any]:
     """Validate expert result against its Pydantic model.
 
@@ -532,7 +558,8 @@ async def refine_node(state: AnalysisState) -> dict:  # noqa: D401
 
     Reads ``quality_scores`` and ``refinement_round``.  For each expert with
     an overall score below the threshold, re-invokes the expert with the
-    evaluator's feedback appended as additional context.
+    SAME params as the execute path (A4: data_path/memory_context were
+    dropped, so refined results could be worse than the first pass).
 
     Returns:
         dict with keys ``expert_results``, ``execution_errors``,
@@ -572,6 +599,10 @@ async def refine_node(state: AnalysisState) -> dict:  # noqa: D401
             "query": query,
             "scope": scope,
             "budget": budget,
+            # A4: mirror the execute path — dropping these made refine run
+            # on synthetic data even when the first pass had real data.
+            "data_path": state.get("data_path") or "",
+            "memory_context": state.get("memory_context") or [],
             "is_refinement": True,
         }
         async with asyncio.timeout(settings.expert_timeout_seconds):
@@ -741,7 +772,7 @@ Be concise but specific. Use data and metrics from the expert results.
     for r in state.get("expert_results", []):
         ek = r.get("kpis")
         if isinstance(ek, dict):
-            kpi_snapshot.update(ek)
+            _merge_kpis(kpi_snapshot, ek, r.get("expert", "unknown"))
     if state.get("budget"):
         kpi_snapshot.setdefault("budget", float(state["budget"]))
     render_state = {**dict(state), "kpi_snapshot": kpi_snapshot}

@@ -185,3 +185,35 @@ class TestCompatSuccess:
 
         r = self._compat({"status": AnalysisStatus.FAILED})
         assert r["success"] is False
+
+
+class TestCompatSnapshotPassthrough:
+    """A8: compat must pass through the state's kpi_snapshot verbatim."""
+
+    def test_state_snapshot_passed_through(self):
+        from src.graph.state import AnalysisStatus
+        from src.graph.workflow import _build_compat_result
+
+        state = {
+            "status": AnalysisStatus.COMPLETED,
+            "final_report": "R",
+            "kpi_snapshot": {"budget": 9.0, "subsidy_expected_roi": 1.6},
+            "expert_results": [{"expert": "subsidy", "kpis": {"budget": 123.0}}],
+        }
+        r = _build_compat_result(state, query="q", scope="full")
+        assert r["kpi_snapshot"]["budget"] == 9.0  # state wins, not recompute
+
+    def test_recompute_fallback_when_state_empty(self):
+        from src.graph.state import AnalysisStatus
+        from src.graph.workflow import _build_compat_result
+
+        r = _build_compat_result(
+            {
+                "status": AnalysisStatus.COMPLETED,
+                "final_report": "R",
+                "expert_results": [{"expert": "subsidy", "kpis": {"x": 1.0}}],
+            },
+            query="q",
+            scope="full",
+        )
+        assert r["kpi_snapshot"] == {"x": 1.0}

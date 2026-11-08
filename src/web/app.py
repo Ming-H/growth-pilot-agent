@@ -56,7 +56,13 @@ async def lifespan(app: FastAPI):
         await init_db()
         logger.info("Database tables initialized")
     except Exception as exc:
-        logger.warning("Database init failed (tables may already exist): %s", exc)
+        if settings.demo_mode:
+            # demo/test: tables often pre-created by fixtures — continue
+            logger.warning("Database init failed (tables may already exist): %s", exc)
+        else:
+            # C10: swallowing this in production started the app against a
+            # half-initialised DB and every request failed downstream.
+            raise RuntimeError(f"Database init failed: {exc}") from exc
 
     yield
     logger.info("GrowthPilot API shutting down")
