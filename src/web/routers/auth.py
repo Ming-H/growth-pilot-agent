@@ -6,6 +6,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user
@@ -46,7 +47,13 @@ async def register(
         role="owner",
     )
     db.add(user)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        # C9: concurrent registration of the same email — the pre-check is
+        # advisory, the unique constraint is the real guard.
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Email already registered")
 
     token = create_access_token(data={"sub": user.id, "org_id": org.id, "role": user.role})
 

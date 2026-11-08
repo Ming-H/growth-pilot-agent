@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class RegisterRequest(BaseModel):
@@ -10,6 +10,18 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=8)
     name: str = ""
     org_name: str = ""
+
+    @field_validator("email")
+    @classmethod
+    def _validate_email(cls, v: str) -> str:
+        """C9: basic shape check + lowercase normalisation (no new dep —
+        ``A@B.com`` and ``a@b.com`` used to be distinct accounts)."""
+        import re
+
+        v = v.strip().lower()
+        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", v):
+            raise ValueError("invalid email address")
+        return v
 
 
 class LoginRequest(BaseModel):

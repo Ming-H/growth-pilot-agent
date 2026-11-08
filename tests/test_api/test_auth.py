@@ -241,3 +241,34 @@ class TestMe:
             headers={"Authorization": "Bearer invalid.token.here"},
         )
         assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+class TestRegisterHardening:
+    """C9: email validation/normalisation; race handled by the constraint."""
+
+    async def test_invalid_email_rejected(self, auth_app):
+        async with AsyncClient(
+            transport=ASGITransport(app=auth_app), base_url="http://test"
+        ) as client:
+            resp = await client.post(
+                "/api/v1/auth/register",
+                json={"email": "not-an-email", "password": "Pass-1234"},
+            )
+        assert resp.status_code == 422
+
+    async def test_email_normalised_lowercase(self, auth_app):
+        """A@B.com and a@b.com are the same account."""
+        async with AsyncClient(
+            transport=ASGITransport(app=auth_app), base_url="http://test"
+        ) as client:
+            r1 = await client.post(
+                "/api/v1/auth/register",
+                json={"email": "Case.Test@Example.COM", "password": "Pass-1234"},
+            )
+            assert r1.status_code == 201
+            r2 = await client.post(
+                "/api/v1/auth/register",
+                json={"email": "case.test@example.com", "password": "Pass-1234"},
+            )
+        assert r2.status_code == 409  # same account, not a duplicate

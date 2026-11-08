@@ -299,8 +299,16 @@ class ProspectExpert(ExpertAgentBase):
         import pandas as pd
 
         if data_path:
-            path = __import__("pathlib").Path(data_path)
-            if path.is_file():
+            # B16: validate through SecureDataLoader — the sibling experts
+            # (subsidy/retention) go through it; direct Path() here allowed
+            # arbitrary filesystem reads (path traversal).
+            try:
+                from src.tools.common.secure_loader import SecureDataLoader
+
+                path = SecureDataLoader().validate_path(data_path)
+            except Exception:
+                path = None
+            if path is not None and path.is_file():
                 if path.suffix == ".csv":
                     df = pd.read_csv(path)
                     return {"user_logs": df, "user_profile": pd.DataFrame()}

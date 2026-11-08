@@ -56,12 +56,20 @@ async def get_checkpointer():  # noqa: ANN202 – return type depends on backend
         logger.info("[checkpoint] Using MemorySaver (%s)", reason)
         return MemorySaver()
 
+    # --- SQLite backend -> MemorySaver (A7: no doomed Postgres attempt) ---
+    if settings.db_url.startswith("sqlite"):
+        logger.info("[checkpoint] SQLite db_url -> MemorySaver (Postgres-only saver)")
+        return MemorySaver()
+
     # --- Production mode: AsyncPostgresSaver ------------------------------
     # The settings.db_url uses SQLAlchemy-style URLs
     # (e.g. ``postgresql+asyncpg://user:pass@host/db``).  AsyncPostgresSaver
     # expects a plain connection string compatible with ``psycopg`` /
-    # ``asyncpg``, so strip the ``+asyncpg`` driver portion.
-    conn_string = settings.db_url.replace("+asyncpg", "")
+    # ``asyncpg`` — strip any SQLAlchemy driver suffix (A7: asyncpg-only
+    # replace left ``+psycopg://`` URLs invalid).
+    import re as _re
+
+    conn_string = _re.sub(r"\+(asyncpg|psycopg2|psycopg)", "", settings.db_url)
 
     try:
         # ``from_conn_string`` returns an async context manager. The saver
@@ -69,8 +77,17 @@ async def get_checkpointer():  # noqa: ANN202 – return type depends on backend
         # context manually and keep a module-level reference to prevent
         # premature cleanup by the garbage collector.
         cm = AsyncPostgresSaver.from_conn_string(conn_string)
-        checkpointer = await cm.__aenter__()
-        await checkpointer.setup()
+        try:
+            checkpointer = await cm.__aenter__()
+            await checkpointer.setup()
+        except Exception:
+            # A7: __aenter__ succeeded but setup() failed — exit the CM we
+            # opened, or the connection leaks while we fall back.
+            try:
+                await cm.__aexit__(None, None, None)
+            except Exception:
+                pass
+            raise
         global _pg_saver_cm
         _pg_saver_cm = cm
         logger.info(
