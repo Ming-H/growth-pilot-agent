@@ -55,3 +55,29 @@ class TestHonestFailureContract:
     async def test_empty_errors_list_stays_success(self):
         result = await _ProbeExpert({"kpis": {"a": 1.0}, "errors": []}).analyze({"query": "q"})
         assert result["success"] is True
+
+
+class TestSystemPromptRevival:
+    """B6: analyze must SEND the expert's system prompt — _invoke_llm
+    always accepted system_override, but analyze never passed it, so
+    700+ lines of crafted role prompts never reached any model."""
+
+    @pytest.mark.asyncio
+    async def test_synthesis_sends_system_prompt(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        class _Expert(_ProbeExpert):
+            def _get_system_prompt(self) -> str:
+                return "你是测试领域专家系统提示"
+
+        expert = _Expert({"kpis": {"a": 1.0}})
+        expert.llm = MagicMock()
+        expert.llm.ainvoke = AsyncMock(return_value=MagicMock(content='{"summary": "s"}'))
+        await expert.analyze({"query": "q"})
+
+        messages = expert.llm.ainvoke.call_args[0][0]
+        assert isinstance(messages[0], SystemMessage)
+        assert messages[0].content == "你是测试领域专家系统提示"
+        assert isinstance(messages[-1], HumanMessage)

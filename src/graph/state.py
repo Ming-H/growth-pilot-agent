@@ -50,10 +50,15 @@ def _merge_by_key(
     new: list[dict[str, Any]],
     key: str,
 ) -> list[dict[str, Any]]:
-    """Merge list-of-dicts by a key field (upsert semantics)."""
-    out = {item.get(key, i): item for i, item in enumerate(existing)}
+    """Merge list-of-dicts by a key field (upsert semantics).
+
+    A11: items MISSING the key are positional — they can never be matched
+    by a later merge (distinct _e/_n namespaces, same type), so new
+    keyless entries append instead of silently replacing.
+    """
+    out = {item.get(key, f"_e{i}"): item for i, item in enumerate(existing)}
     for i, item in enumerate(new):
-        out[item.get(key, f"_{i}")] = item
+        out[item.get(key, f"_n{i}")] = item
     return list(out.values())
 
 

@@ -5,7 +5,6 @@
 # capabilities. Wire it into the relevant expert agent when needed.
 
 from src.tools.common.data_loader import DataLoader
-from src.tools.common.experiment_platform import ExperimentPlatform
 from src.tools.common.secure_loader import SecureDataLoader
 
 __all__ = [

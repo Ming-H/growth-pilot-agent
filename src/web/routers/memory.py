@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.api_models import MemoryClearResponse, MemoryEntryResponse, MemoryResponse
 from src.auth.dependencies import get_current_user
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/v1/memory", tags=["memory"])
 
 @router.get("", response_model=MemoryResponse)
 async def list_memory(
-    limit: int = 20,
+    limit: int = Query(20, ge=1, le=200),
     current_user: User = Depends(get_current_user),
 ) -> MemoryResponse:
     """Retrieve recent analyses, scoped to the user's org."""
@@ -43,7 +43,10 @@ async def list_memory(
 async def clear_memory(
     current_user: User = Depends(get_current_user),
 ) -> MemoryClearResponse:
-    """Clear every memory trace for the user's org."""
+    """Clear every memory trace for the user's org (owner only — C15:
+    wiping an org's entire memory is not a member-level action)."""
+    if current_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Only the org owner can clear memory")
     removed = await get_memory().clear_org(current_user.org_id)
     return MemoryClearResponse(
         removed_count=removed,

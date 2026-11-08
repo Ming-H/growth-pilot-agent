@@ -22,6 +22,27 @@ from src.core.base import BaseAgent
 logger = logging.getLogger(__name__)
 
 
+class ToolStub:
+    """Placeholder for a tool whose native deps failed to import.
+
+    Each agent module used to carry a byte-identical copy of this class
+    in its import-fallback except block (B11) — one shared definition
+    now. Calling any method raises RuntimeError with the tool name, so a
+    stubbed expert degrades loudly through _safe_execute, never crashes.
+    """
+
+    def __init__(self, *a: Any, **kw: Any) -> None:  # noqa: D107
+        pass
+
+    def __getattr__(self, name: str) -> Any:
+        def _stub_method(*a: Any, **kw: Any) -> Any:
+            raise RuntimeError(
+                f"Stub tool: {name}() called but tool is not available (import failed)"
+            )
+
+        return _stub_method
+
+
 class ExpertAgentBase(BaseAgent):
     """Base class for Tier 2 expert agents.
 
@@ -153,7 +174,13 @@ class ExpertAgentBase(BaseAgent):
         if self.llm:
             try:
                 prompt = self._build_synthesis_prompt(params, results)
-                llm_response = await self._invoke_llm(prompt)
+                # B6: pass the domain system prompt — _invoke_llm always
+                # supported system_override, but analyze never sent it, so
+                # 700+ lines of crafted expert role prompts never reached
+                # the model.
+                llm_response = await self._invoke_llm(
+                    prompt, system_override=self._get_system_prompt()
+                )
                 analysis = self._parse_json_response(llm_response)
                 results["analysis"] = analysis
             except Exception as exc:

@@ -23,20 +23,7 @@ except (ImportError, OSError) as _import_err:
 
     _logging.getLogger(__name__).warning("Tool import failed, using stubs: %s", _import_err)
 
-    class _Stub:
-        """Stub that raises RuntimeError when any method is called."""
-
-        def __init__(self, *a: Any, **kw: Any) -> None:
-            pass
-
-        def __getattr__(self, name: str) -> Any:
-            def _stub_method(*a: Any, **kw: Any) -> Any:
-                raise RuntimeError(
-                    f"Stub tool: {name}() called but tool is not available (import failed)"
-                )
-
-            return _stub_method
-
+    from src.core.expert import ToolStub as _Stub
     RTAStrategy = BidOptimizer = CreativeAnalyzer = AudienceAnalyzer = _Stub
 
 

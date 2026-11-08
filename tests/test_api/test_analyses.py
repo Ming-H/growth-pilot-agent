@@ -318,3 +318,48 @@ class TestStreamInterruptionPersist:
             assert refreshed.status == "interrupted"
             assert refreshed.error_message == "disconnected"
             assert refreshed.duration_seconds == 1.5
+
+
+@pytest.mark.asyncio
+class TestMemoryClearPermission:
+    """C15: clearing an org's memory is owner-only."""
+
+    async def test_member_cannot_clear(self, client):
+        reg = await client.post(
+            "/api/v1/auth/register",
+            json={"email": "mem-owner@example.com", "password": "Pass-1234", "name": "o"},
+        )
+        assert reg.status_code == 201
+        owner = reg.json()
+
+        # 直接插一个同 org 的 member 用户(无注册入口, 走 DB)
+        from src.auth.security import hash_password
+        from src.db.database import get_session_factory
+        from src.db.models import User
+
+        async with get_session_factory()() as session:
+            member = User(
+                email="mem-member@example.com",
+                hashed_password=hash_password("Pass-1234"),
+                name="m",
+                org_id=owner["org_id"],
+                role="member",
+            )
+            session.add(member)
+            await session.commit()
+
+        from src.auth.jwt import create_access_token
+
+        member_token = create_access_token(
+            data={"sub": member.id, "org_id": owner["org_id"], "role": "member"}
+        )
+        resp = await client.delete(
+            "/api/v1/memory", headers={"Authorization": f"Bearer {member_token}"}
+        )
+        assert resp.status_code == 403
+
+        # owner 可以
+        resp = await client.delete(
+            "/api/v1/memory", headers={"Authorization": f"Bearer {owner['access_token']}"}
+        )
+        assert resp.status_code == 200

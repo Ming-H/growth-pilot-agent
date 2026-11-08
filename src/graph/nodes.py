@@ -275,7 +275,12 @@ async def plan_node(state: AnalysisState) -> dict:  # noqa: D401
         }
 
     try:
-        prompt = PLAN_PROMPT.format(query=query, scope=scope or "full") + memory_block
+        # A10: context BEFORE the "reply with ONLY JSON" instruction —
+        # appended after it, models tended to continue the context instead
+        # of emitting JSON (json.loads failure → silent keyword fallback).
+        prompt = (memory_block + "\n" if memory_block else "") + PLAN_PROMPT.format(
+            query=query, scope=scope or "full"
+        )
         response = await llm.ainvoke(prompt)
         content = response.content if hasattr(response, "content") else str(response)
         content = content.strip()
