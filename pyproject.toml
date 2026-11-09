@@ -56,6 +56,8 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.41b0",
     # Rate limiting
     "slowapi>=0.1.9",
+    # MCP server (stdio tools surface)
+    "mcp>=1.2",
 ]
 
 [project.scripts]

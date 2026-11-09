@@ -546,6 +546,25 @@ def info() -> None:
 
 
 # ---------------------------------------------------------------------------
+# mcp command (Model Context Protocol server, stdio)
+# ---------------------------------------------------------------------------
+
+
+@main.command("mcp")
+def mcp_serve() -> None:
+    """Start the MCP server (stdio) exposing growth analysis tools.
+
+    Registers the five deterministic tools (subsidy_optimize / ltv_rank /
+    churn_watchlist / funnel_bottleneck / budget_allocate) over stdio for
+    MCP hosts such as Claude Code:
+    ``claude mcp add growth-pilot -- uv --directory <repo> run gpa mcp``
+    """
+    from src.mcp_server import run_server
+
+    run_server()
+
+
+# ---------------------------------------------------------------------------
 # eval command (offline quality evaluation)
 # ---------------------------------------------------------------------------
 
