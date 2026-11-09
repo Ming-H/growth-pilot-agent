@@ -590,6 +590,12 @@ def mcp_serve() -> None:
     flag_value="full",
     help="Full pipeline evaluation per sample (requires LLM API key).",
 )
+@click.option(
+    "--tasks",
+    "mode",
+    flag_value="tasks",
+    help="Task-level benchmark (τ-bench for Growth): end-to-end scoring against ground truth.",
+)
 @click.option("--limit", "-l", default=0, type=int, help="Max samples (0 = all).")
 @click.option("--output", "-o", default="", help="Write the markdown report to a file.")
 def eval_cli(mode: str, limit: int, output: str) -> None:
@@ -598,8 +604,80 @@ def eval_cli(mode: str, limit: int, output: str) -> None:
         _run_router_eval(limit, output)
     elif mode == "heuristic":
         _run_async(_run_heuristic_eval(limit, output))
+    elif mode == "tasks":
+        _run_async(_run_tasks_eval(limit, output))
     else:
         _run_async(_run_full_eval(limit, output))
+
+
+async def _run_tasks_eval(limit: int, output: str, min_rate: float = 1.0) -> None:
+    """Task-level benchmark: does the system deliver the RIGHT answer?
+
+    Per task (zero-LLM workflow mode, deterministic): routing hit + numeric
+    ground-truth match in kpi_snapshot + gate pass; honesty tasks require an
+    empty snapshot (no fabricated KPIs). Exit code 1 when the success rate
+    drops below *min_rate* — the benchmark is a gate, not a report.
+    """
+    import os
+    import sys
+
+    os.environ["GPA_LLM_CHANNEL"] = "remote"
+    os.environ["GPA_LLM_API_KEY"] = ""
+    get_settings.cache_clear()
+    from src.core.config import get_settings as _gs
+
+    assert not _gs().llm_available, "task benchmark requires no LLM"
+
+    from src.evals.tasks import builtin_tasks, score_task
+    from src.graph import nodes as graph_nodes
+    from src.graph.workflow import run_workflow
+
+    tasks = builtin_tasks()[: limit or None]
+
+    table = Table(
+        title="Task Benchmark (τ-bench for Growth, zero-key, deterministic)",
+        show_header=True,
+    )
+    table.add_column("Task", style="cyan", max_width=30)
+    table.add_column("Route", justify="center")
+    table.add_column("Numeric", justify="center")
+    table.add_column("Gate", justify="center")
+    table.add_column("Experts", style="dim", max_width=26)
+
+    passed = 0
+    for task in tasks:
+        graph_nodes._clear_expert_cache()
+        result = await run_workflow(
+            query=task.query, scope="", budget=task.budget, mode="workflow"
+        )
+        score = score_task(task, result)
+        passed += score.ok
+
+        def _mark(ok: bool) -> str:
+            return "[green]✓[/green]" if ok else "[red]✗[/red]"
+
+        experts = ",".join(sorted((result.get("expert_results") or {}).keys())) or "—"
+        table.add_row(
+            task.id,
+            _mark(score.route_ok),
+            _mark(score.numeric_ok),
+            _mark(score.gate_ok),
+            experts,
+        )
+
+    console.print(table)
+    rate = passed / len(tasks) if tasks else 0.0
+    console.print(
+        f"Task benchmark: [bold]{rate:.0%}[/bold] ({passed}/{len(tasks)}) "
+        f"— threshold {min_rate:.0%}"
+    )
+    if output:
+        Path(output).write_text(
+            f"# Task Benchmark\n\nPass: {rate:.0%} ({passed}/{len(tasks)})\n",
+            encoding="utf-8",
+        )
+    if rate < min_rate:
+        sys.exit(1)
 
 
 async def _run_heuristic_eval(limit: int, output: str) -> None:

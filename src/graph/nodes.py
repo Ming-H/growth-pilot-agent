@@ -324,6 +324,50 @@ async def plan_node(state: AnalysisState) -> dict:  # noqa: D401
         }
 
 
+_GROWTH_VOCAB = (
+    "分析",
+    "增长",
+    "用户",
+    "预算",
+    "营销",
+    "转化",
+    "漏斗",
+    "留存",
+    "流失",
+    "召回",
+    "补贴",
+    "优惠券",
+    "广告",
+    "投放",
+    "客群",
+    "线索",
+    "潜客",
+    "复购",
+    "ROI",
+    "LTV",
+    "GMV",
+    "CAC",
+    "growth",
+    "budget",
+    "churn",
+    "retention",
+    "funnel",
+    "subsidy",
+    "campaign",
+    "acquisition",
+)
+
+
+def _looks_growth_related(query: str) -> bool:
+    """True when the query mentions growth-domain vocabulary at all.
+
+    Used only by the router fallback — queries that hit an expert keyword
+    directly never reach this check.
+    """
+    lowered = query.lower()
+    return any(word.lower() in lowered for word in _GROWTH_VOCAB)
+
+
 def _intent_classify(query: str) -> list[str]:
     """Score each expert's confidence for the query using can_handle().
 
@@ -361,9 +405,18 @@ def _intent_classify(query: str) -> list[str]:
     # Select experts scoring >= 0.5
     selected = [name for name, score in scores if score >= 0.5]
 
-    # Default to all if none qualify
+    # Default to all if none qualify — but only for growth-looking queries.
+    # Honesty guard (task benchmark `honesty_refusal`): an out-of-domain
+    # query (e.g. "写一首诗") must yield an EMPTY selection so the graph
+    # degrades honestly, instead of fabricating a full growth analysis.
+    # The vocabulary gate keeps the original robustness for domain queries
+    # that simply use unexpected wording.
     if not selected:
-        selected = [name for name, _ in experts]
+        if _looks_growth_related(query):
+            selected = [name for name, _ in experts]
+        else:
+            logger.info("[_intent_classify] out-of-domain query, refusing: %r", query[:40])
+            return []
 
     logger.info(
         "[_intent_classify] Scores: %s -> Selected: %s",

@@ -68,7 +68,7 @@ def subsidy_optimize(
 
     Purpose: integer-programming coupon allocation over segment-level causal
     effects; ATE estimated on the demo subsidy experiment (backdoor adjustment),
-    mirroring the subsidy expert's pipeline.
+    using the exact data recipe of the subsidy expert pipeline.
 
     When to call: "how should I split this coupon budget", per-segment coupon
     sizing, subsidy ROI questions — e.g. "50000 yuan coupon budget, how to
@@ -84,7 +84,6 @@ def subsidy_optimize(
 
     Data: synthetic demo (seed=42) — data_source: synthetic.
     """
-    from src.tools.common.data_loader import DataLoader
     from src.tools.subsidy.budget_optimizer import BudgetOptimizer
     from src.tools.subsidy.causal_engine import CausalInferenceEngine
 
@@ -93,7 +92,11 @@ def subsidy_optimize(
     if max_coupon_yuan < min_coupon_yuan:
         return {"error": "max_coupon_yuan must be >= min_coupon_yuan"}
 
-    data = DataLoader().generate_subsidy_experiment_data(n_users=2000)
+    # Same data path as the subsidy expert (load_sample_data recipe) so MCP
+    # numbers agree with `gpa analyze` runs and the task-benchmark oracle.
+    from src.agents.subsidy import SubsidyExpert
+
+    data = SubsidyExpert._load_or_generate_data("")
     if "treatment" not in data.columns:
         if "group" in data.columns:
             data["treatment"] = (data["group"] != "control").astype(int)

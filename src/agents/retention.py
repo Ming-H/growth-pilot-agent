@@ -320,7 +320,12 @@ class RetentionExpert(ExpertAgentBase):
         )
         churn_risk = results.get("churn_risk", {})
         churn_risk_summary = str(churn_risk) if churn_risk else ""
-        high_risk_count = len(results.get("high_risk_users", []))
+        # TRUE count, not the capped display sample (B7 sibling — feeding
+        # len(top-5) here made LLM narration claim "5 high-risk users").
+        high_risk_count = int(
+            (results.get("kpis") or {}).get("churn_high_risk_count")
+            or len(results.get("high_risk_users", []))
+        )
         churn_factors = (
             str(results.get("churn_factors", "")) if results.get("churn_factors") else ""
         )

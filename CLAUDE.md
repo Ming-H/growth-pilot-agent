@@ -30,8 +30,10 @@ uv run gpa analyze --scope full --query "分析本月用户增长" --budget 5000
 uv run gpa analyze --mode workflow --scope full --query "..."              # fixed DAG
 uv run gpa analyze -v ...    # diagnostic tier: node trace + degradations (stderr)
 uv run gpa analyze --json .. # machine tier: full state JSON, honest exit code
-uv run gpa eval --router         # deterministic router eval (no LLM)
+uv run gpa eval --router         # deterministic router eval (no LLM, 16 samples)
+uv run gpa eval --tasks          # task benchmark: 7 end-to-end tasks vs ground truth (CI gates at 100%)
 uv run gpa eval --heuristic      # zero-key regression baseline (CI-safe)
+uv run gpa mcp                   # MCP server (stdio): 5 deterministic tools, SDK v2 MCPServer
 
 # Web API (FastAPI, http://localhost:8000/docs)
 make web
@@ -102,3 +104,4 @@ Agent tool specs (`src/agent/tools.py`) are ACI-style: purpose/when-to-call/args
 1. **Determinism**: same input + zero-key mode ⇒ byte-identical report (`tests/test_graph/test_zero_key.py`, `gpa eval --heuristic`). Requires: single-threaded numeric env in conftest, LightGBM deterministic params, fixed synthetic-data time anchors, unique per-run thread_ids.
 2. **Honesty**: every degradation visible in `state["degradations"]`; `--json` exit code reflects failure/gate-degradation; `llm_available` never faked (demo_mode does not fake a keyless remote channel).
 3. **只删不造**: `_validate_subgoals` never adds experts; the KPI gate never loosens for legit numbers — the numbers join the ground truth instead.
+4. **宁拒不编 (routing)**: `_intent_classify` falls back to ALL experts only when the query carries growth vocabulary (`_looks_growth_related`); out-of-domain queries select nothing and the graph degrades honestly (enforced by task `honesty_refusal`). Report-side honesty: the retention section reports `kpis.churn_high_risk_count`, never `len(high_risk_users)` (top-5 display sample).

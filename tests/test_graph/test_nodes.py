@@ -123,6 +123,38 @@ class TestPlanNode:
 
             result = await plan_node(state)
 
+        # Honesty guard (task benchmark `honesty_refusal`): an out-of-domain
+        # query with no growth vocabulary routes to NOTHING — refusing
+        # honestly beats fabricating a full growth analysis.
+        assert result["selected_experts"] == []
+
+    @pytest.mark.asyncio
+    async def test_fallback_to_all_experts_for_growth_vocab_query(self):
+        """No keyword hit + growth vocabulary present → still falls back to all."""
+        from src.graph.nodes import plan_node
+
+        state = {
+            "query": "帮我看看整体增长情况",
+            "scope": "",
+            "budget": 1000.0,
+            "org_id": "org-1",
+            "user_id": "u-1",
+            "status": AnalysisStatus.PENDING,
+            "expert_results": [],
+            "execution_errors": [],
+        }
+
+        with (
+            patch("src.guardrails.input_guard.validate_input") as mock_validate,
+            patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm,
+        ):
+            mock_validate.return_value = MagicMock(passed=True, sanitized_input=state["query"])
+            mock_llm = MagicMock()
+            mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM unavailable"))
+            mock_create_llm.return_value = mock_llm
+
+            result = await plan_node(state)
+
         assert len(result["selected_experts"]) == 6
 
 

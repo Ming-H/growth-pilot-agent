@@ -38,6 +38,11 @@ jobs:
           GPA_DEMO_MODE: "true"
           GPA_LLM_API_KEY: "sk-test-placeholder"
         run: uv run gpa eval --router
+      - name: Task benchmark (τ-bench for Growth, gates at 100%)
+        env:
+          GPA_DEMO_MODE: "true"
+          GPA_LLM_API_KEY: "sk-test-placeholder"
+        run: uv run gpa eval --tasks
 
   docker:
     runs-on: ubuntu-latest

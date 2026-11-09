@@ -16,8 +16,9 @@
 | **LLM 双通道** | 本地推理（Ollama 原生协议 / vLLM 等 OpenAI 兼容端点，无需 API key）与云端 API（智谱 GLM / DeepSeek 等）仅通过 `GPA_LLM_BASE_URL` 一个变量切换 |
 | **多租户 Web API** | JWT 认证、组织级数据隔离、分析持久化、SSE 流式进度、人工审批（HITL）断点恢复 |
 | **可观测性** | 产品态（成功静默）、诊断态（`-v`：节点级耗时与降级标记）、机器态（`--json`：完整状态输出与语义化退出码） |
-| **内置评测** | 路由命中率（确定性、CI 安全）、零 LLM 回归基线（含报告可复现性断言）、LLM 评审全链路评测 |
+| **内置评测** | 路由命中率（确定性、CI 安全）、**任务级基准（τ-bench for Growth：路由+数值真值+闸门三重评分，含诚实拒答任务）**、零 LLM 回归基线（含报告可复现性断言）、LLM 评审全链路评测 |
 | **工程韧性** | LLM 熔断器（进程级共享）、跨厂商降级、指数退避重试、专家级超时、按请求的 token 成本归因、输入注入防护与输出检查 |
+| **MCP 服务** | `gpa mcp` 以 stdio 暴露 5 个确定性增长工具（补贴优化/LTV 排序/流失预警/漏斗瓶颈/跨渠道预算分配），Claude 等 MCP 宿主即插即用；数据 `data_source: synthetic` 诚实标注 |
 
 ## 系统架构
 
@@ -100,6 +101,8 @@ gpa analyze --scope full --json | jq '.kpi_snapshot'                 # 机器模
 gpa analyze --mode workflow ...                                      # 固定 DAG 模式
 gpa chat                                                             # 多轮对话（会话记忆；/new 新会话，/facts 查询事实台账）
 gpa eval --router                                                    # 路由评测（确定性，16/16，CI 防回归）
+gpa eval --tasks                                                     # 任务级基准（τ-bench for Growth，7/7，CI 门槛）
+gpa mcp                                                              # 启动 MCP 服务（stdio，5 个确定性增长工具）
 gpa eval --heuristic                                                 # 零 LLM 回归基线（含报告可复现性断言）
 gpa eval --full                                                      # 全链路 LLM 评审（需配置 key）
 gpa kpi                                                              # KPI 快照
@@ -138,6 +141,28 @@ make web    # http://localhost:8000/docs
 
 人工审批流程：请求携带 `approval_required=true` 且预算超过阈值（`GPA_BUDGET_APPROVAL_THRESHOLD`，默认 ¥10,000）时，执行在审批节点暂停并持久化 checkpoint；通过 `/approve` 提交决策后从中断点恢复。
 
+## MCP 服务
+
+工具层的 Model Context Protocol 标准化暴露——任何 MCP 宿主（Claude Code / Claude Desktop 等）可直接调用增长分析工具：
+
+```bash
+# 启动服务（stdio）
+gpa mcp
+
+# 接入 Claude Code
+claude mcp add growth-pilot -- uv --directory /path/to/growth-pilot-agent run gpa mcp
+```
+
+| 工具 | 能力 |
+|---|---|
+| `subsidy_optimize` | ATE 因果估计 → 整数规划优惠券分配（预算/券面额入参，返回分配方案+增量订单+ROI） |
+| `ltv_rank` | 特征工程 → LightGBM LTV 排序（top-K 用户 + 客群均值） |
+| `churn_watchlist` | 流失预警名单 + 模型质量透明（AUC/AP 随结果返回） |
+| `funnel_bottleneck` | 各级转化率 + 最大流失环节定位 |
+| `budget_allocate` | 凹响应曲线 + 整数规划跨渠道预算分配 |
+
+设计边界：工具层纯确定性（seed=42，零 LLM/零记忆/零闸门），所有结果带 `data_source: synthetic` 诚实标注；叙事化报告与 KPI 对账闸门仍走 `gpa analyze`。工具描述遵循 ACI 纪律（purpose / when-to-call / args / failure-modes）。
+
 ## 配置参考
 
 常用环境变量（完整列表见 `src/core/config.py` 与 `.env.example`，均带 `GPA_` 前缀）：
@@ -159,9 +184,10 @@ make web    # http://localhost:8000/docs
 ## 测试与评测
 
 ```bash
-make test          # 全量测试（574 用例）
+make test          # 全量测试（608 用例）
 make lint          # ruff 检查与格式校验
 gpa eval --router  # 路由命中率评测（确定性 16 条样本，已进 CI）
+gpa eval --tasks   # 任务级基准（τ-bench for Growth）：路由+数值真值+闸门三重评分，含诚实拒答任务，CI 门槛 100%
 gpa eval --heuristic  # 零 LLM 回归基线：断言成功/路由/KPI/报告/两次运行报告一致
 ```
 

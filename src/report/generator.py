@@ -211,7 +211,14 @@ class ReportGenerator:
         high_risk = data.get("high_risk_users", [])
         if high_risk:
             lines.append("### 高流失风险用户\n")
-            lines.append(f"- 高风险用户数: {len(high_risk)}")
+            # Report the TRUE at-risk count — the high_risk list is a capped
+            # display sample (top-5), so its length must never be presented
+            # as the population count. The count lives in the expert's
+            # nested kpis dict (B7 sibling: task-benchmark gate violation
+            # "高风险用户数: 5" while the snapshot said 492).
+            kpis = data.get("kpis") or {}
+            count = kpis.get("churn_high_risk_count") or data.get("churn_high_risk_count")
+            lines.append(f"- 高风险用户数: {count if count is not None else len(high_risk)}")
             churn_factors = data.get("churn_factors", [])
             if churn_factors:
                 lines.append(f"- 主要流失因素: {', '.join(str(f) for f in churn_factors[:5])}")

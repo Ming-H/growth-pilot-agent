@@ -5,6 +5,46 @@ All notable changes to the GrowthPilot Agent project will be documented in this 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.1.0] - 2026-11-09
+
+### MCP 化 + 任务级评测基准（τ-bench for Growth）
+
+业界 2026-11 快照：MCP 已成 Agent 工具层事实标准（月 SDK 下载 9700 万），
+任务式评测（τ-bench）与评测驱动开发成为 Agent 工程核心能力维度。本版把
+两者带入平台，并让新基准当场抓出并修复 4 个真实缺陷。设计文档：
+`docs/plans/2026-11-09-mcp-and-task-benchmark-design.md`。
+
+### Added
+
+- **MCP 服务**（`src/mcp_server.py`，`gpa mcp`）：官方 SDK v2 MCPServer
+  （stdio），暴露 5 个确定性增长工具——subsidy_optimize（ATE→IP 优惠券
+  分配）/ ltv_rank / churn_watchlist / funnel_bottleneck / budget_allocate。
+  高层业务参数、零 LLM/零记忆/零闸门、`data_source: synthetic` 诚实标注、
+  ACI 风格工具描述；数据与专家 demo 路径同源（数值一致）。
+- **任务级基准**（`src/evals/tasks.py`，`gpa eval --tasks`）：7 个端到端
+  增长任务，真值由绕过图的直调工具独立计算；三重评分（路由正确 ⊆ / 数值
+  命中 kpi_snapshot 容差匹配 / 闸门通过），含 `honesty_refusal` 诚实拒答
+  任务（非增长问题不得伪造 KPI）；成功率跌破 100% 即非零退出，已进 CI。
+
+### Fixed（全部由新基准当场抓出）
+
+- **路由诚实洞**：`_intent_classify` 兜底"无命中→全专家"会让"写一首诗"
+  之类的域外问题跑全量增长分析并产出 KPI。新增增长词表守卫：无专家命中
+  且无增长词汇 → 返回空选择（诚实拒答），保留原兜底的抗噪性。
+- **报告计数谎言（B7 兄弟）**：报告生成器用 `len(high_risk_users)`（top-5
+  展示样本长度）当"高风险用户数"输出——快照真值 492，报告却写 5，触发
+  闸门违规。改为读嵌套 `kpis.churn_high_risk_count`。
+- **LLM 叙述同源谎言**：`_build_synthesis_prompt` 同样喂 len(top-5) 给
+  模型，LLM 模式会叙述"5 个高风险用户"。同修。
+- **MCP 补贴工具数据源漂移**：直调配方与专家管线数据生成器不一致导致
+  ATE 不可对账（0.0122 vs 0.0346）。改走 `SubsidyExpert` 同款加载路径。
+
+### Tests
+
+- 新增 34 个用例（574 → 608）：MCP 工具结构/确定性/诚实报错/协议级
+  list_tools+call_tool 往返；任务基准评分纯函数；路由诚实守卫；报告真值
+  计数回归；subsidy/honesty 两任务真实图端到端。
+
 ## [9.0.0] - 2026-10-28
 
 ### KPI 校验闸门式增长 Agent
