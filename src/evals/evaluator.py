@@ -469,7 +469,7 @@ class AgentEvaluator:
         # \{.*\} spanned from first to last brace across prose paragraphs
         # and manufactured invalid JSON out of two valid objects.
         try:
-            obj, _ = json.JSONDecoder().raw_decode(text[text.index("{"):])
+            obj, _ = json.JSONDecoder().raw_decode(text[text.index("{") :])
             return obj
         except (ValueError, IndexError):
             pass

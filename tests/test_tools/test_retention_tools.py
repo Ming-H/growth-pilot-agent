@@ -259,9 +259,7 @@ class TestRetentionKpiHonesty:
 
         from src.agents.retention import RetentionExpert
 
-        r = asyncio.run(
-            RetentionExpert(llm=None).analyze({"query": "流失分析", "data_path": ""})
-        )
+        r = asyncio.run(RetentionExpert(llm=None).analyze({"query": "流失分析", "data_path": ""}))
         # synthetic churn segments have far more than the 5-sample cap
         assert r["kpis"]["churn_high_risk_count"] > 5 or r["kpis"][
             "churn_high_risk_count"

@@ -644,16 +644,17 @@ class TestPlanLLMWhitelist:
         assert "budget" in _EXPERT_KEYS
         mock_response = MagicMock()
         mock_response.content = json.dumps(
-            {"reasoning": "cross-channel budget", "experts": ["budget", "prospect"],
-             "context_summary": "budget allocation"}
+            {
+                "reasoning": "cross-channel budget",
+                "experts": ["budget", "prospect"],
+                "context_summary": "budget allocation",
+            }
         )
         with (
             patch("src.guardrails.input_guard.validate_input") as mock_validate,
             patch("src.core.llm_factory.create_resilient_llm") as mock_create_llm,
         ):
-            mock_validate.return_value = MagicMock(
-                passed=True, sanitized_input="全局预算分配"
-            )
+            mock_validate.return_value = MagicMock(passed=True, sanitized_input="全局预算分配")
             mock_llm = MagicMock()
             mock_llm.ainvoke = AsyncMock(return_value=mock_response)
             mock_create_llm.return_value = mock_llm
@@ -686,9 +687,7 @@ class TestRefineValidation:
         from src.graph.nodes import refine_node
 
         inst = MagicMock()
-        inst.run = AsyncMock(
-            return_value={"success": True, "kpis": {"churn_high_risk_ratio": 0.2}}
-        )
+        inst.run = AsyncMock(return_value={"success": True, "kpis": {"churn_high_risk_ratio": 0.2}})
         with patch("src.graph.nodes._create_expert", return_value=inst):
             result = await refine_node(
                 {

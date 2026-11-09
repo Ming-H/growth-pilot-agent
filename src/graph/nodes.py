@@ -45,7 +45,10 @@ def _merge_kpis(base: dict[str, Any], incoming: dict[str, Any], expert: str) -> 
             logger.warning(
                 "[kpi_snapshot] collision: '%s' from '%s' overwrites %s with %s "
                 "(prefix cross-expert KPIs to avoid this)",
-                key, expert, old, value,
+                key,
+                expert,
+                old,
+                value,
             )
         base[key] = value
     return base

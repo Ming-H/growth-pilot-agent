@@ -26,7 +26,6 @@ except (ImportError, OSError) as _import_err:
     _logging.getLogger(__name__).warning("Tool import failed, using stubs: %s", _import_err)
 
 
-
 class BudgetExpert(ExpertAgentBase):
     """Global budget orchestration across the four spend channels."""
 

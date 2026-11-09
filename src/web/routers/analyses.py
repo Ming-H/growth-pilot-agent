@@ -212,9 +212,7 @@ async def _persist_stream_status(
     try:
         session_factory = get_session_factory()
         async with session_factory() as update_db:
-            result_db = await update_db.execute(
-                select(Analysis).where(Analysis.id == analysis_id)
-            )
+            result_db = await update_db.execute(select(Analysis).where(Analysis.id == analysis_id))
             analysis_obj = result_db.scalar_one_or_none()
             if analysis_obj:
                 analysis_obj.status = status

@@ -91,9 +91,7 @@ class GlobalBudgetAllocator:
         for channel, grid in channel_grids.items():
             # HiGHS returns binaries as 0.99999999999…, never exactly 1 —
             # threshold, don't equality-test.
-            chosen = next(
-                (l for l in range(len(grid)) if (x[(channel, l)].value() or 0) > 0.5), 0
-            )
+            chosen = next((l for l in range(len(grid)) if (x[(channel, l)].value() or 0) > 0.5), 0)
             spend, gmv = grid[chosen]
             allocation[channel] = spend
             details[channel] = {

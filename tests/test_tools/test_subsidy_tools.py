@@ -345,12 +345,22 @@ class TestRefutationDeterminism:
         data = self._make_data()
         est = engine.estimate_ate(data, treatment="t", outcome="y", confounders=["x"])
         r1 = engine.refutation_test(
-            est, data, treatment="t", outcome="y", confounders=["x"],
-            method="random_common_cause", n_simulations=3,
+            est,
+            data,
+            treatment="t",
+            outcome="y",
+            confounders=["x"],
+            method="random_common_cause",
+            n_simulations=3,
         )
         r2 = engine.refutation_test(
-            est, data, treatment="t", outcome="y", confounders=["x"],
-            method="random_common_cause", n_simulations=3,
+            est,
+            data,
+            treatment="t",
+            outcome="y",
+            confounders=["x"],
+            method="random_common_cause",
+            n_simulations=3,
         )
         assert r1.get("new_effect") == r2.get("new_effect")
 
@@ -361,11 +371,21 @@ class TestRefutationDeterminism:
         data = self._make_data()
         est = engine.estimate_ate(data, treatment="t", outcome="y", confounders=["x"])
         r1 = engine.refutation_test(
-            est, data, treatment="t", outcome="y", confounders=["x"],
-            method="placebo_treatment", n_simulations=3,
+            est,
+            data,
+            treatment="t",
+            outcome="y",
+            confounders=["x"],
+            method="placebo_treatment",
+            n_simulations=3,
         )
         r2 = engine.refutation_test(
-            est, data, treatment="t", outcome="y", confounders=["x"],
-            method="placebo_treatment", n_simulations=3,
+            est,
+            data,
+            treatment="t",
+            outcome="y",
+            confounders=["x"],
+            method="placebo_treatment",
+            n_simulations=3,
         )
         assert r1.get("new_effect") == r2.get("new_effect")

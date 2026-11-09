@@ -248,9 +248,7 @@ class TestHITLOrgIsolation:
     async def test_approve_on_completed_is_409(self, client):
         """C5 guard: double-approve / approving a finished run must 409."""
         a = await self._register(client, "iso-c")
-        analysis_id = await self._insert_analysis(
-            a["org_id"], a["user_id"], status="completed"
-        )
+        analysis_id = await self._insert_analysis(a["org_id"], a["user_id"], status="completed")
         resp = await client.post(
             f"/api/v1/analyses/{analysis_id}/approve",
             json={"approved": True},
@@ -260,9 +258,7 @@ class TestHITLOrgIsolation:
 
     async def test_resume_on_completed_is_409(self, client):
         a = await self._register(client, "iso-d")
-        analysis_id = await self._insert_analysis(
-            a["org_id"], a["user_id"], status="completed"
-        )
+        analysis_id = await self._insert_analysis(a["org_id"], a["user_id"], status="completed")
         resp = await client.post(
             f"/api/v1/analyses/{analysis_id}/resume",
             headers={"Authorization": f"Bearer {a['access_token']}"},

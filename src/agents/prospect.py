@@ -25,6 +25,7 @@ except (ImportError, OSError) as _import_err:
     _logging.getLogger(__name__).warning("Tool import failed, using stubs: %s", _import_err)
 
     from src.core.expert import ToolStub as _Stub
+
     FeatureEngine = IntentModel = UserScorer = UserSegmentor = LTVPredictor = _Stub
 
 

@@ -647,9 +647,7 @@ async def _run_tasks_eval(limit: int, output: str, min_rate: float = 1.0) -> Non
     passed = 0
     for task in tasks:
         graph_nodes._clear_expert_cache()
-        result = await run_workflow(
-            query=task.query, scope="", budget=task.budget, mode="workflow"
-        )
+        result = await run_workflow(query=task.query, scope="", budget=task.budget, mode="workflow")
         score = score_task(task, result)
         passed += score.ok
 
