@@ -33,6 +33,11 @@ jobs:
           GPA_LLM_API_KEY: "sk-test-placeholder"
           GPA_DB_URL: "sqlite+aiosqlite:///./test.db"
         run: uv run pytest tests/ -v --tb=short -x
+      - name: Router eval (deterministic, no LLM)
+        env:
+          GPA_DEMO_MODE: "true"
+          GPA_LLM_API_KEY: "sk-test-placeholder"
+        run: uv run gpa eval --router
 
   docker:
     runs-on: ubuntu-latest

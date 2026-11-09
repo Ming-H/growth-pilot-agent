@@ -99,7 +99,7 @@ gpa analyze --scope subsidy --budget 50000 --query "补贴 ROI" -v     # 诊断�
 gpa analyze --scope full --json | jq '.kpi_snapshot'                 # 机器模式（完整状态 JSON；失败或闸门拦截时退出码为 1）
 gpa analyze --mode workflow ...                                      # 固定 DAG 模式
 gpa chat                                                             # 多轮对话（会话记忆；/new 新会话，/facts 查询事实台账）
-gpa eval --router                                                    # 路由评测（确定性，14/14）
+gpa eval --router                                                    # 路由评测（确定性，16/16，CI 防回归）
 gpa eval --heuristic                                                 # 零 LLM 回归基线（含报告可复现性断言）
 gpa eval --full                                                      # 全链路 LLM 评审（需配置 key）
 gpa kpi                                                              # KPI 快照
@@ -159,9 +159,9 @@ make web    # http://localhost:8000/docs
 ## 测试与评测
 
 ```bash
-make test          # 全量测试（509 用例）
+make test          # 全量测试（574 用例）
 make lint          # ruff 检查与格式校验
-gpa eval --router  # 路由命中率评测（离线）
+gpa eval --router  # 路由命中率评测（确定性 16 条样本，已进 CI）
 gpa eval --heuristic  # 零 LLM 回归基线：断言成功/路由/KPI/报告/两次运行报告一致
 ```
 
@@ -175,7 +175,7 @@ src/
 ├── graph/            # workflow DAG · 节点实现 · KPI 闸门节点 · 图运行时缓存
 ├── core/             # 配置（双通道）· LLM 工厂 · KPI 闸门 · 专家基类
 │                     # · 质量评审 · 成本归因 · 输入输出护栏
-├── agents/           # 五个领域专家（确定性管线 + 综合提示词）
+├── agents/           # 六个领域专家（确定性管线 + 综合提示词；budget 为跨渠道统筹层）
 ├── tools/            # 确定性 ML 工具（LightGBM / HiGHS / statsmodels / BG-NBD）
 ├── memory/           # 三层记忆存储（L0/L1/L2 + FTS5 检索）
 ├── web/              # FastAPI 应用（app / deps / routers）
