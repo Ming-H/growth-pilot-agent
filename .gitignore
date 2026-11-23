@@ -30,3 +30,5 @@ Thumbs.db
 data/memory/
 *.db
 test.db
+experiments/dspy_planner/compiled/
+experiments/dspy_planner/report-*.json

@@ -90,6 +90,7 @@ ignore = ["E741", "N806", "N803"]
 [dependency-groups]
 dev = [
     "aiosqlite>=0.22.1",
+    "dspy[optuna]>=3.5.0",
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "ruff>=0.4",
