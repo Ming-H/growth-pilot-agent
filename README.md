@@ -4,6 +4,27 @@
 
 平台支持两种运行形态：零 LLM 依赖的确定性模式（关键词路由 + 规则打分 + 模板报告，全程可复现），以及接入 LLM 后的智能编排模式（规划、专家调度、质量评审由模型驱动）。两种模式运行在同一张状态图上，所有降级点均带有显式标记。
 
+## 架构定位（业界对照）
+
+本项目采用 **Subagents 模式**（LangChain 2026 年 1 月定义的四种多 Agent 架构之一），并在 v10 中引入 **Router 式分层调度**（Supervisor 按查询复杂度分派层级），形成 **Subagents + Router 混合架构**。
+
+LangChain 定义的多 Agent 四种模式（[原文](https://www.langchain.com/blog/choosing-the-right-multi-agent-architecture)）：
+
+| 模式 | 核心机制 | 适合场景 | GPA 采用 |
+|---|---|---|---|
+| **Subagents** | 中央 Agent 调度子 Agent（作为工具调用），子 Agent 独立执行返回结果 | 多领域 + 并行 + 上下文隔离 | ✅ 主模式（Chief + 6 专家） |
+| **Skills** | 单 Agent 按需加载专业人格（提示词+脚本+资源） | 单 Agent 多专长 + 轻量组合 | — |
+| **Handoffs** | 状态驱动切换活跃 Agent，上下文跨轮保持 | 顺序流程（客服分阶段） | — |
+| **Router** | 分类输入→并行分发到领域 Agent→综合结果 | 多垂直领域查询 | ✅ 调度层（Supervisor 三层路由） |
+
+**设计依据**（为什么选 Subagents + Router 混合，而非全 Agent 化）：
+
+1. **Anthropic 实测数据**（[multi-agent research system](https://www.anthropic.com/research/multi-agent-research-system), 2025.06）：多 Agent 比单 Agent 在研究评估上高 90.2%，但 token 消耗 ~15×——"multi-agent systems require tasks where the value of the task is high enough to pay for the increased performance"
+2. **GrowthPilot 场景特征**：约 70% 查询为简单事实/单领域分析（不配用完整 Agent），约 25% 为中等分析（专家+LLM 足够），约 5% 为跨域深度分析（需要 ReAct 循环迭代）
+3. **分层解法**：Tier 0（确定性管线，零 LLM，~0 成本）→ Tier 1（专家 Agent，1-2 次 LLM，~1× 成本）→ Tier 2（深度 Agent，3-10 次 LLM，~5× 成本），平均成本 ~2-3×，远低于全 Agent 化的 15×
+
+详细设计见 [docs/DESIGN-v10-tiered.md](docs/DESIGN-v10-tiered.md)。
+
 ## 功能特性
 
 | 能力 | 说明 |
